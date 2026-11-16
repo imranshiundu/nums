@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Game, W, H } from '@/lib/game/engine';
 
-export default function NumberTempleGame() {
+export default function NumsGame() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
 
@@ -45,7 +45,7 @@ export default function NumberTempleGame() {
       className="flex min-h-screen flex-col items-center justify-center bg-[#1a140a] p-0 select-none"
       style={{ touchAction: 'none' }}
     >
-      <h1 className="sr-only">Number Temple Escape - a live playable numbers adventure game</h1>
+      <h1 className="sr-only">NUMS - a live playable numbers adventure game</h1>
       <div
         className="relative mx-auto my-auto overflow-hidden rounded-none sm:rounded-2xl sm:shadow-2xl sm:my-6"
         style={{
@@ -58,7 +58,7 @@ export default function NumberTempleGame() {
           ref={canvasRef}
           className="block h-full w-full cursor-pointer"
           onPointerDown={handleDown}
-          aria-label="Number Temple Escape game canvas - tap to play"
+          aria-label="NUMS game canvas - tap to play"
           role="img"
         />
       </div>

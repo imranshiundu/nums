@@ -1,0 +1,1296 @@
+     1→     1→// ============================================================
+     2→     2→// NUMBER TEMPLE ESCAPE - Game Engine
+     3→     3→// 6 levels mirroring the source video:
+     4→     4→//  1. THE BALANCE        - two green 4s balance a golden seesaw -> merge 4+4=8
+     5→     5→//  2. APPLE CLIMB        - pink 8 climbs & catches 8 golden apples (voice counts)
+     6→     6→//  3. GIANT ROAMING      - boulder chase, tap SPLIT: 8 = 4 + 4
+     7→     7→//  4. SPLIT IN HALF      - low tunnel: tap SPLIT: 4 = 2 + 2
+     8→     8→//  5. THE EXIT           - sneak past the giant eye: 2 = 1 + 1
+     9→     9→//  6. ESCAPE             - tropical paradise, merge-up celebration 1..8
+    10→    10→// Design space: 576 x 1024
+    11→    11→// ============================================================
+    12→    12→
+    13→    13→import {
+    14→    14→  PAL, Ctx,
+    15→    15→  roundRect,
+    16→    16→  drawGreen4, drawPink8, drawOrange2, drawRed1,
+    17→    17→  drawCaveBackground, drawSpotlight, drawGoldenDoor, drawPlanks,
+    18→    18→  drawBallPit, drawSeesaw, drawBoulder, drawBridge, drawTunnelArch,
+    19→    19→  drawGuardEye, drawExitDoor, drawBadge,
+    20→    20→  drawStarburst, drawEquation, drawChipEquation,
+    21→    21→  drawSplitButton, drawApple,
+    22→    22→  Particle, updateParticles, drawParticles, spawnSparkles,
+    23→    23→} from './sprites';
+    24→    24→import {
+    25→    25→  initAudio, pickVoice, say, sayNumber, setMuted, isMuted,
+    26→    26→  sfxPop, sfxBoing, sfxTap, sfxWhoosh, sfxSparkle, sfxBoom,
+    27→    27→  sfxAlarm, sfxBonk, sfxSneak, sfxFanfare, sfxChime,
+    28→    28→  startRumble, stopRumble, startMusic, stopMusic,
+    29→    29→} from './audio';
+    30→    30→import { setEquationFont } from './sprites';
+    31→    31→
+    32→    32→export const W = 576;
+    33→    33→export const H = 1024;
+    34→    34→
+    35→    35→type GameState = 'title' | 'intro' | 'play' | 'reveal' | 'retry' | 'win';
+    36→    36→
+    37→    37→interface LevelInfo {
+    38→    38→  n: number;
+    39→    39→  title: string;
+    40→    40→  equation: string;
+    41→    41→  instruction: string;
+    42→    42→}
+    43→    43→
+    44→    44→const LEVELS: LevelInfo[] = [
+    45→    45→  { n: 1, title: 'THE BALANCE', equation: '4 + 4', instruction: '' },
+    46→    46→  { n: 2, title: 'GOLDEN APPLE CLIMB', equation: '8', instruction: '' },
+    47→    47→  { n: 3, title: 'GIANT ROAMING ALERT', equation: '8 = 4 + 4', instruction: '' },
+    48→    48→  { n: 4, title: 'SPLIT IN HALF', equation: '4 = 2 + 2', instruction: '' },
+    49→    49→  { n: 5, title: 'THE EXIT', equation: '2 = 1 + 1', instruction: '' },
+    50→    50→  { n: 6, title: 'WE ESCAPED!', equation: '', instruction: '' },
+    51→    51→];
+    52→    52→
+    53→    53→interface Apple { x: number; y: number; vy: number; caught: boolean; dead: boolean; t: number }
+    54→    54→
+    55→    55→export class Game {
+    56→    56→  private c: Ctx;
+    57→    57→  private canvas: HTMLCanvasElement;
+    58→    58→  private raf = 0;
+    59→    59→  private lastT = 0;
+    60→    60→  private globalT = 0;
+    61→    61→  state: GameState = 'title';
+    62→    62→  private stateT = 0;
+    63→    63→  private level = 1;
+    64→    64→  private particles: Particle[] = [];
+    65→    65→  private shake = 0;
+    66→    66→  private timeScale = 1;
+    67→    67→  private mutedFlag = false;
+    68→    68→
+    69→    69→  // ---- level 1 ----
+    70→    70→  private l1 = {
+    71→    71→    angle: 0, angVel: 0, count: 0,
+    72→    72→    bounceL: 0, bounceR: 0,
+    73→    73→    windT: 0, merged: false, mergeT: 0,
+    74→    74→    done: false,
+    75→    75→  };
+    76→    76→
+    77→    77→  // ---- level 2 ----
+    78→    78→  private l2 = {
+    79→    79→    y: 760, laneX: 288, targetX: 288,
+    80→    80→    apples: [] as Apple[], caught: 0, spawnT: 0.6,
+    81→    81→    done: false, doneT: 0, climbBob: 0,
+    82→    82→  };
+    83→    83→
+    84→    84→  // ---- level 3 ----
+    85→    85→  private l3 = {
+    86→    86→    b8x: 0, boulderX: -420, alertT: 0,
+    87→    87→    splitT: -1, fours: 0, boulderFall: 0, crashed: false,
+    88→    88→    done: false, bridgeStart: 820, bridgeEnd: 1340,
+    89→    89→    walkT: 0,
+    90→    90→  };
+    91→    91→
+    92→    92→  // ---- level 4 ----
+    93→    93→  private l4 = {
+    94→    94→    x1: 70, x2: 140, splitT: -1, twos: 0,
+    95→    95→    tunnelX: 468, done: false, failed: false, bonkT: -1,
+    96→    96→    warnT: 0,
+    97→    97→  };
+    98→    98→
+    99→    99→  // ---- level 5 ----
+   100→   100→  private l5 = {
+   101→   101→    phase: 'pre' as 'pre' | 'sneak' | 'open',
+   102→   102→    progress: 150, lastSafe: 0,
+   103→   103→    eyeCycle: 0, eyeOpen: 0, // eyeOpen 0..1
+   104→   104→    caughtFlash: 0,
+   105→   105→    hopT: -1, done: false, doorT: 0, warnSound: false,
+   106→   106→  };
+   107→   107→
+   108→   108→  // ---- level 6 ----
+   109→   109→  private l6 = { stage: 0, t: 0, confettiT: 0 };
+   110→   110→
+   111→   111→  constructor(canvas: HTMLCanvasElement) {
+   112→   112→    this.canvas = canvas;
+   113→   113→    const c = canvas.getContext('2d');
+   114→   114→    if (!c) throw new Error('no 2d context');
+   115→   115→    this.c = c;
+   116→   116→    // use the self-hosted Nunito (next/font) for equations, once available
+   117→   117→    try {
+   118→   118→      const fam = getComputedStyle(document.body).getPropertyValue('--font-nunito').trim();
+   119→   119→      setEquationFont(fam);
+   120→   120→    } catch { /* keep fallback */ }
+   121→   121→    this.resize();
+   122→   122→    this.loop = this.loop.bind(this);
+   123→   123→    this.raf = requestAnimationFrame(this.loop);
+   124→   124→    // debug/testing handle (also lets power users inspect state)
+   125→   125→    (window as unknown as { __ntGame?: Game }).__ntGame = this;
+   126→   126→  }
+   127→   127→
+   128→   128→  destroy(): void {
+   129→   129→    cancelAnimationFrame(this.raf);
+   130→   130→    stopRumble();
+   131→   131→    stopMusic();
+   132→   132→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   133→   133→  }
+   134→   134→
+   135→   135→  resize(): void {
+   136→   136→    const dpr = Math.min(2, window.devicePixelRatio || 1);
+   137→   137→    const rect = this.canvas.getBoundingClientRect();
+   138→   138→    this.canvas.width = Math.round(rect.width * dpr);
+   139→   139→    this.canvas.height = Math.round(rect.height * dpr);
+   140→   140→  }
+   141→   141→
+   142→   142→  // ---------- input ----------
+   143→   143→  onTap(x: number, y: number): void {
+   144→   144→    initAudio();
+   145→   145→    pickVoice();
+   146→   146→    // mute button hit test (top-right circle)
+   147→   147→    const mx = 522, my = 46, mr = 30;
+   148→   148→    if ((x - mx) ** 2 + (y - my) ** 2 <= mr * mr) {
+   149→   149→      this.mutedFlag = !isMuted();
+   150→   150→      setMuted(this.mutedFlag);
+   151→   151→      if (!this.mutedFlag) sfxTap();
+   152→   152→      return;
+   153→   153→    }
+   154→   154→    switch (this.state) {
+   155→   155→      case 'title':
+   156→   156→        startMusic();
+   157→   157→        this.enterIntro(1);
+   158→   158→        break;
+   159→   159→      case 'intro':
+   160→   160→        this.startLevel(this.level);
+   161→   161→        break;
+   162→   162→      case 'reveal':
+   163→   163→        break; // auto-advances
+   164→   164→      case 'retry':
+   165→   165→        break; // auto-advances
+   166→   166→      case 'win':
+   167→   167→        this.backToTitle();
+   168→   168→        break;
+   169→   169→      case 'play':
+   170→   170→        this.tapPlay(x, y);
+   171→   171→        break;
+   172→   172→    }
+   173→   173→  }
+   174→   174→
+   175→   175→  private tapPlay(x: number, y: number): void {
+   176→   176→    if (this.level === 1) this.tapL1(x);
+   177→   177→    else if (this.level === 2) this.tapL2(x);
+   178→   178→    else if (this.level === 3) this.tapL3();
+   179→   179→    else if (this.level === 4) this.tapL4();
+   180→   180→    else if (this.level === 5) this.tapL5();
+   181→   181→    else if (this.level === 6) this.tapL6();
+   182→   182→  }
+   183→   183→
+   184→   184→  // ---------- state transitions ----------
+   185→   185→  private enterIntro(n: number): void {
+   186→   186→    stopRumble();
+   187→   187→    this.level = n;
+   188→   188→    if (n === 6) {
+   189→   189→      this.startLevel(6);
+   190→   190→      return;
+   191→   191→    }
+   192→   192→    this.state = 'intro';
+   193→   193→    this.stateT = 0;
+   194→   194→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   195→   195→  }
+   196→   196→
+   197→   197→  private startLevel(n: number): void {
+   198→   198→    this.state = 'play';
+   199→   199→    this.stateT = 0;
+   200→   200→    this.particles = [];
+   201→   201→    this.shake = 0;
+   202→   202→    this.timeScale = 1;
+   203→   203→    if (n === 1) {
+   204→   204→      this.l1 = { angle: 0.15, angVel: 0, count: 0, bounceL: 0, bounceR: 0, windT: 0, merged: false, mergeT: 0, done: false };
+   205→   205→    } else if (n === 2) {
+   206→   206→      this.l2 = { y: 760, laneX: 288, targetX: 288, apples: [], caught: 0, spawnT: 0.5, done: false, doneT: 0, climbBob: 0 };
+   207→   207→    } else if (n === 3) {
+   208→   208→      this.l3 = { b8x: 0, boulderX: -160, alertT: 0, splitT: -1, fours: 0, boulderFall: 0, crashed: false, done: false, bridgeStart: 820, bridgeEnd: 1340, walkT: 0 };
+   209→   209→    } else if (n === 4) {
+   210→   210→      this.l4 = { x1: 70, x2: 150, splitT: -1, twos: 0, tunnelX: 468, done: false, failed: false, bonkT: -1, warnT: 0 };
+   211→   211→    } else if (n === 5) {
+   212→   212→      this.l5 = { phase: 'pre', progress: 150, lastSafe: 0, eyeCycle: 0, eyeOpen: 0, caughtFlash: 0, hopT: -1, done: false, doorT: 0, warnSound: false };
+   213→   213→    } else if (n === 6) {
+   214→   214→      this.l6 = { stage: 0, t: 0, confettiT: 0 };
+   215→   215→      stopMusic();
+   216→   216→      sfxFanfare();
+   217→   217→    }
+   218→   218→  }
+   219→   219→
+   220→   220→  private enterReveal(parts: string[], next: () => void): void {
+   221→   221→    // stored transition is executed on reveal end
+   222→   222→    this.pendingNext = next;
+   223→   223→    this.revealParts = parts;
+   224→   224→    this.state = 'reveal';
+   225→   225→    this.stateT = 0;
+   226→   226→    sfxSparkle();
+   227→   227→    spawnSparkles(this.particles, W / 2, H / 2 - 120, 40, PAL.goldLight);
+   228→   228→  }
+   229→   229→  private pendingNext: (() => void) | null = null;
+   230→   230→  private revealParts: string[] = [];
+   231→   231→
+   232→   232→  private enterRetry(msg = 'OOPS! TRY AGAIN!'): void {
+   233→   233→    stopRumble();
+   234→   234→    this.state = 'retry';
+   235→   235→    this.stateT = 0;
+   236→   236→    this.retryMsg = msg;
+   237→   237→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   238→   238→    say('Whoa!', { rate: 1.15, pitch: 0.9 });
+   239→   239→  }
+   240→   240→  private retryMsg = 'OOPS! TRY AGAIN!';
+   241→   241→
+   242→   242→  private backToTitle(): void {
+   243→   243→    this.state = 'title';
+   244→   244→    this.stateT = 0;
+   245→   245→    this.level = 1;
+   246→   246→    startMusic();
+   247→   247→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   248→   248→  }
+   249→   249→
+   250→   250→  // ============================================================
+   251→   251→  // LEVEL 1 - THE BALANCE
+   252→   252→  // ============================================================
+   253→   253→  private tapL1(x: number): void {
+   254→   254→    const l = this.l1;
+   255→   255→    if (l.merged || l.done) return;
+   256→   256→    const side = x < W / 2 ? -1 : 1; // -1 left, 1 right
+   257→   257→    // NOTE: positive angle = clockwise = RIGHT side down, LEFT side up
+   258→   258→    const highSide = l.angle > 0.035 ? -1 : l.angle < -0.035 ? 1 : (Math.random() > 0.5 ? -1 : 1);
+   259→   259→    const good = side === highSide || Math.abs(l.angle) <= 0.035;
+   260→   260→    if (good) {
+   261→   261→      l.count++;
+   262→   262→      l.angVel += side * 1.5;
+   263→   263→      if (side < 0) l.bounceL = 1; else l.bounceR = 1;
+   264→   264→      sfxTap(1 + (l.count % 3) * 0.12);
+   265→   265→      sfxBoing(side < 0 ? 1.1 : 0.9);
+   266→   266→      sayNumber(Math.min(8, l.count));
+   267→   267→      spawnSparkles(this.particles, W / 2 + side * 180, 620, 6, PAL.goldLight);
+   268→   268→      if (l.count >= 8) {
+   269→   269→        l.merged = true;
+   270→   270→        l.mergeT = 0;
+   271→   271→        say('And double it! Four plus four equals eight!', { rate: 1.05 });
+   272→   272→        sfxSparkle();
+   273→   273→        spawnSparkles(this.particles, W / 2, 560, 50, PAL.goldLight);
+   274→   274→      }
+   275→   275→    } else {
+   276→   276→      l.angVel += side * 1.9;
+   277→   277→      sfxBonk();
+   278→   278→      spawnSparkles(this.particles, W / 2 + side * 180, 620, 8, PAL.redLight);
+   279→   279→    }
+   280→   280→  }
+   281→   281→
+   282→   282→  private updateL1(dt: number): void {
+   283→   283→    const l = this.l1;
+   284→   284→    l.windT += dt;
+   285→   285→    if (l.bounceL > 0) l.bounceL = Math.max(0, l.bounceL - dt * 4);
+   286→   286→    if (l.bounceR > 0) l.bounceR = Math.max(0, l.bounceR - dt * 4);
+   287→   287→    if (!l.merged) {
+   288→   288→      // destabilizing beam physics + gentle wind gusts (tuned to be fair)
+   289→   289→      l.angVel += (l.angle * 1.2 + Math.sin(l.windT * 1.7) * 0.35) * dt * 2.0;
+   290→   290→      l.angVel *= 0.955;
+   291→   291→      l.angle += l.angVel * dt * 0.5;
+   292→   292→      if (Math.abs(l.angle) > 0.72) {
+   293→   293→        this.enterRetry('THE BLOCKS SLID OFF!');
+   294→   294→        return;
+   295→   295→      }
+   296→   296→    } else {
+   297→   297→      l.mergeT += dt;
+   298→   298→      if (l.mergeT > 2.4 && !l.done) {
+   299→   299→        l.done = true;
+   300→   300→        this.enterReveal(['4', '+', '4', '=', '8'], () => {
+   301→   301→          this.enterIntro(2);
+   302→   302→        });
+   303→   303→      }
+   304→   304→    }
+   305→   305→  }
+   306→   306→
+   307→   307→  private drawL1(): void {
+   308→   308→    const c = this.c;
+   309→   309→    const l = this.l1;
+   310→   310→    drawCaveBackground(c, this.globalT);
+   311→   311→    drawSpotlight(c, W / 2, 0, 260, 780, 0.22);
+   312→   312→    drawGoldenDoor(c, 288, 640, 96, 150, 0.4 + 0.6 * Math.abs(Math.sin(this.globalT * 0.7)));
+   313→   313→    drawBallPit(c, 770, 254, this.globalT);
+   314→   314→    // seesaw
+   315→   315→    const angle = l.merged ? 0 : l.angle;
+   316→   316→    drawSeesaw(c, 288, 640, 216, angle);
+   317→   317→    // the two green 4s riding the beam (seated along the beam line)
+   318→   318→    const beamY = 640;
+   319→   319→    const sa = Math.sin(angle);
+   320→   320→    const ca = Math.cos(angle);
+   321→   321→    if (!l.merged) {
+   322→   322→      const squashL = l.bounceL * 0.5;
+   323→   323→      const squashR = l.bounceR * 0.5;
+   324→   324→      drawGreen4(c, {
+   325→   325→        cx: 288 - 200 * ca, bottomY: beamY - 200 * sa - 9,
+   326→   326→        scale: 0.78, look: 0, mouth: Math.abs(l.angle) > 0.4 ? 'worried' : 'smile',
+   327→   327→        squash: squashL, tilt: angle, time: this.globalT,
+   328→   328→      });
+   329→   329→      drawGreen4(c, {
+   330→   330→        cx: 288 + 200 * ca, bottomY: beamY + 200 * sa - 9,
+   331→   331→        scale: 0.78, look: 0, mouth: Math.abs(l.angle) > 0.4 ? 'worried' : 'smile',
+   332→   332→        squash: squashR, tilt: angle, time: this.globalT,
+   333→   333→      });
+   334→   334→    } else {
+   335→   335→      // merge animation: both slide to center, pink 8 rises
+   336→   336→      const mt = Math.min(1, l.mergeT / 1.0);
+   337→   337→      const gx = 288 - 200 * (1 - mt);
+   338→   338→      const gy = beamY - 200 * sa * (1 - mt);
+   339→   339→      if (mt < 1) {
+   340→   340→        drawGreen4(c, { cx: gx, bottomY: gy, scale: 0.78, look: 0, squash: 0.3, armsUp: true, time: this.globalT, alpha: 1 - mt * 0.7 });
+   341→   341→        drawGreen4(c, { cx: 288 + 200 * (1 - mt), bottomY: gy, scale: 0.78, look: 0, squash: 0.3, armsUp: true, time: this.globalT, alpha: 1 - mt * 0.7 });
+   342→   342→      }
+   343→   343→      if (l.mergeT > 0.9) {
+   344→   344→        const rise = Math.min(1, (l.mergeT - 0.9) / 0.7);
+   345→   345→        const bob = Math.sin(this.globalT * 3) * 6;
+   346→   346→        const bottom = beamY + 20 - rise * 160 + bob * rise;
+   347→   347→        drawPink8(c, {
+   348→   348→          cx: 288, bottomY: bottom, scale: 0.85 + rise * 0.15,
+   349→   349→          look: 0, armsUp: true, apples: 0, mouth: 'smile', time: this.globalT,
+   350→   350→        });
+   351→   351→        drawBadge(c, 288, bottom - 300, 8, 1.1);
+   352→   352→      }
+   353→   353→    }
+   354→   354→    // equation, exactly like the video: "4 + 4"
+   355→   355→    const chips: Array<'4' | '+' | '=' | '8' | '?'> = l.merged ? ['4', '+', '4', '=', '8'] : ['4', '+', '4'];
+   356→   356→    drawChipEquation(c, 92, 96, chips);
+   357→   357→    this.drawMuteBtn();
+   358→   358→    this.drawParticlesAndShake();
+   359→   359→  }
+   360→   360→
+   361→   361→  // ============================================================
+   362→   362→  // LEVEL 2 - APPLE CLIMB
+   363→   363→  // ============================================================
+   364→   364→  private tapL2(x: number): void {
+   365→   365→    const l = this.l2;
+   366→   366→    if (l.done) return;
+   367→   367→    l.targetX = x < 192 ? 168 : x < 384 ? 288 : 408;
+   368→   368→    sfxTap(1.3);
+   369→   369→  }
+   370→   370→
+   371→   371→  private updateL2(dt: number): void {
+   372→   372→    const l = this.l2;
+   373→   373→    l.laneX += (l.targetX - l.laneX) * Math.min(1, dt * 6);
+   374→   374→    if (!l.done) {
+   375→   375→      l.y -= 42 * dt; // auto climb
+   376→   376→      if (l.y < 300) l.y = 300;
+   377→   377→      l.climbBob += dt;
+   378→   378→      // spawn apples
+   379→   379→      l.spawnT -= dt;
+   380→   380→      if (l.spawnT <= 0 && l.caught + l.apples.filter((a) => !a.caught && !a.dead).length < 9) {
+   381→   381→        const lanes = [168, 288, 408];
+   382→   382→        l.apples.push({
+   383→   383→          x: lanes[Math.floor(Math.random() * 3)] + (Math.random() * 30 - 15),
+   384→   384→          y: -40, vy: 150 + Math.random() * 70, caught: false, dead: false, t: 0,
+   385→   385→        });
+   386→   386→        l.spawnT = Math.max(0.45, 1.1 - this.globalT * 0.01) + Math.random() * 0.5;
+   387→   387→      }
+   388→   388→      // move & catch
+   389→   389→      for (const a of l.apples) {
+   390→   390→        a.t += dt;
+   391→   391→        if (a.dead) continue;
+   392→   392→        if (a.caught) {
+   393→   393→          a.x += (l.laneX - a.x) * dt * 8;
+   394→   394→          a.y += (l.y - 150 - a.y) * dt * 8;
+   395→   395→          if (a.y < l.y - 145) a.dead = true;
+   396→   396→        } else {
+   397→   397→          a.y += a.vy * dt;
+   398→   398→          const dx = a.x - l.laneX;
+   399→   399→          const dy = a.y - (l.y - 110);
+   400→   400→          if (dx * dx + dy * dy < 80 * 80) {
+   401→   401→            a.caught = true;
+   402→   402→            l.caught++;
+   403→   403→            sfxPop(1 + l.caught * 0.07);
+   404→   404→            sayNumber(l.caught);
+   405→   405→            spawnSparkles(this.particles, a.x, a.y, 12, PAL.goldLight);
+   406→   406→            if (l.caught === 8) {
+   407→   407→              l.done = true;
+   408→   408→              l.doneT = 0;
+   409→   409→              say('The golden delicious!', { rate: 1.0, pitch: 1.2 }); // show line
+   410→   410→              sfxFanfare();
+   411→   411→              spawnSparkles(this.particles, l.laneX, l.y - 110, 60, PAL.goldLight);
+   412→   412→            }
+   413→   413→          } else if (a.y > 900) {
+   414→   414→            a.dead = true;
+   415→   415→          }
+   416→   416→        }
+   417→   417→      }
+   418→   418→      l.apples = l.apples.filter((a) => !a.dead);
+   419→   419→    } else {
+   420→   420→      l.doneT += dt;
+   421→   421→      if (l.doneT > 2.3) {
+   422→   422→        this.enterReveal(['8'], () => this.enterIntro(3));
+   423→   423→      }
+   424→   424→    }
+   425→   425→  }
+   426→   426→
+   427→   427→  private drawL2(): void {
+   428→   428→    const c = this.c;
+   429→   429→    const l = this.l2;
+   430→   430→    drawCaveBackground(c, this.globalT, 'dark');
+   431→   431→    drawSpotlight(c, 288, 0, 230, 1024, 0.16);
+   432→   432→    // climbing pole (grey steel, like the video)
+   433→   433→    const pg = c.createLinearGradient(283, 0, 293, 0);
+   434→   434→    pg.addColorStop(0, '#6e6e6e');
+   435→   435→    pg.addColorStop(0.5, '#b5b5b5');
+   436→   436→    pg.addColorStop(1, '#5a5a5a');
+   437→   437→    c.fillStyle = pg;
+   438→   438→    c.fillRect(283, 120, 10, 720);
+   439→   439→    // platform at bottom
+   440→   440→    drawPlanks(c, 128, 800, 320, 26);
+   441→   441→    // falling apples
+   442→   442→    for (const a of l.apples) {
+   443→   443→      if (!a.caught && !a.dead) drawApple(c, a.x, a.y, 22, true, a.t * 3);
+   444→   444→    }
+   445→   445→    // pink 8 climbing
+   446→   446→    const bob = Math.sin(l.climbBob * 6) * 8;
+   447→   447→    const mouth: 'smile' | 'grit' = l.done ? 'smile' : 'grit';
+   448→   448→    drawPink8(c, {
+   449→   449→      cx: l.laneX, bottomY: l.y + bob, scale: 0.72,
+   450→   450→      look: (l.targetX - l.laneX) * 0.01, mouth,
+   451→   451→      apples: l.done ? 8 : 0, time: this.globalT,
+   452→   452→    });
+   453→   453→    // badge
+   454→   454→    drawBadge(c, l.laneX, l.y + bob - 300, 8, 1);
+   455→   455→    // caught apples flying to arms
+   456→   456→    for (const a of l.apples) {
+   457→   457→      if (a.caught && !a.dead) drawApple(c, a.x, a.y, 18, true, a.t * 4);
+   458→   458→    }
+   459→   459→    this.drawMuteBtn();
+   460→   460→    this.drawParticlesAndShake();
+   461→   461→  }
+   462→   462→
+   463→   463→  // ============================================================
+   464→   464→  // LEVEL 3 - GIANT ROAMING ALERT
+   465→   465→  // ============================================================
+   466→   466→  private tapL3(): void {
+   467→   467→    const l = this.l3;
+   468→   468→    if (l.done || l.splitT >= 0) return;
+   469→   469→    const onBridge = l.b8x >= l.bridgeStart + 30 && l.b8x <= l.bridgeEnd - 60;
+   470→   470→    if (onBridge) {
+   471→   471→      l.splitT = 0;
+   472→   472→      stopRumble();
+   473→   473→      sfxSparkle();
+   474→   474→      sfxWhoosh();
+   475→   475→      say('Eight equals four plus four!', { rate: 1.05 });
+   476→   476→    } else {
+   477→   477→      sfxBonk();
+   478→   478→      this.showTooEarlyFlash = 0.8;
+   479→   479→    }
+   480→   480→  }
+   481→   481→  private showTooEarlyFlash = 0;
+   482→   482→
+   483→   483→  private updateL3(dt: number): void {
+   484→   484→    const l = this.l3;
+   485→   485→    this.showTooEarlyFlash = Math.max(0, this.showTooEarlyFlash - dt);
+   486→   486→    if (l.done) {
+   487→   487→      l.walkT += dt;
+   488→   488→      if (l.walkT > 2.6) {
+   489→   489→        this.enterReveal(['8', '=', '4', '+', '4'], () => this.enterIntro(4));
+   490→   490→      }
+   491→   491→      return;
+   492→   492→    }
+   493→   493→    if (l.splitT >= 0) {
+   494→   494→      // split sequence
+   495→   495→      l.splitT += dt;
+   496→   496→      if (l.splitT > 0.55 && l.fours === 0) {
+   497→   497→        l.fours = 1;
+   498→   498→        spawnSparkles(this.particles, 288, 520, 46, PAL.goldLight);
+   499→   499→        spawnSparkles(this.particles, 288, 520, 20, PAL.greenLight);
+   500→   500→      }
+   501→   501→      // boulder keeps rolling & falls into chasm
+   502→   502→      l.boulderX += 300 * dt;
+   503→   503→      if (!l.crashed && l.boulderX > (l.bridgeStart + l.bridgeEnd) / 2 - 40) {
+   504→   504→        l.crashed = true;
+   505→   505→        l.boulderFall = 0.001;
+   506→   506→        sfxBoom();
+   507→   507→        this.shake = 0.7;
+   508→   508→        spawnSparkles(this.particles, 288, 700, 30, '#8a6a45');
+   509→   509→        say('Phew!', { rate: 1.2, pitch: 1.3 });
+   510→   510→      }
+   511→   511→      if (l.boulderFall > 0) l.boulderFall += dt;
+   512→   512→      if (l.splitT > 1.9 && !l.done) {
+   513→   513→        l.done = true;
+   514→   514→        l.walkT = 0;
+   515→   515→      }
+   516→   516→      return;
+   517→   517→    }
+   518→   518→    // walking phase
+   519→   519→    l.b8x += 128 * dt;
+   520→   520→    l.walkT += dt;
+   521→   521→    const boulderGap = l.b8x - l.boulderX;
+   522→   522→    if (l.walkT > 0.8 && l.alertT === 0) {
+   523→   523→      l.alertT = 0.001;
+   524→   524→      sfxAlarm();
+   525→   525→      say('Giant roaming alert!', { rate: 1.0, pitch: 1.0 });
+   526→   526→      startRumble();
+   527→   527→    }
+   528→   528→    if (l.alertT > 0) {
+   529→   529→      l.alertT += dt;
+   530→   530→      if (l.alertT > 1.2) {
+   531→   531→        l.boulderX += 175 * dt;
+   532→   532→        if (l.boulderX + 66 >= l.b8x - 60) {
+   533→   533→          // caught!
+   534→   534→          stopRumble();
+   535→   535→          sfxBoom();
+   536→   536→          this.shake = 0.9;
+   537→   537→          spawnSparkles(this.particles, 288, 560, 30, PAL.redLight);
+   538→   538→          this.enterRetry('THE GIANT GOT YOU!');
+   539→   539→          return;
+   540→   540→        }
+   541→   541→      }
+   542→   542→    }
+   543→   543→    if (l.b8x > l.bridgeEnd - 30) {
+   544→   544→      // walked off without splitting - bridge ends, fall
+   545→   545→      this.enterRetry('TOO LATE! YOU NEEDED TO SPLIT!');
+   546→   546→    }
+   547→   547→  }
+   548→   548→
+   549→   549→  private drawL3(): void {
+   550→   550→    const c = this.c;
+   551→   551→    const l = this.l3;
+   552→   552→    const cam = Math.max(0, l.b8x - 160);
+   553→   553→    c.save();
+   554→   554→    if (this.shake > 0) {
+   555→   555→      c.translate((Math.random() - 0.5) * this.shake * 26, (Math.random() - 0.5) * this.shake * 26);
+   556→   556→    }
+   557→   557→    drawCaveBackground(c, this.globalT, 'dark');
+   558→   558→    drawSpotlight(c, 288, 0, 300, 1024, 0.14);
+   559→   559→    // ground with chasm
+   560→   560→    const groundY = 660;
+   561→   561→    const sx = (wx: number): number => wx - cam;
+   562→   562→    c.save();
+   563→   563→    // left ground
+   564→   564→    const leftEnd = sx(l.bridgeStart);
+   565→   565→    if (leftEnd > -50) {
+   566→   566→      drawPlanks(c, -50, groundY, leftEnd + 50, 40);
+   567→   567→    }
+   568→   568→    // bridge
+   569→   569→    const b0 = sx(l.bridgeStart);
+   570→   570→    const b1 = sx(l.bridgeEnd);
+   571→   571→    drawBridge(c, b0, groundY, Math.max(0, b1 - b0), 26);
+   572→   572→    // right ground
+   573→   573→    if (b1 < W + 50) {
+   574→   574→      drawPlanks(c, b1, groundY, W + 50 - b1, 40);
+   575→   575→    }
+   576→   576→    // chasm shadow
+   577→   577→    c.fillStyle = 'rgba(0,0,0,0.65)';
+   578→   578→    c.fillRect(b0, groundY + 40, Math.max(0, b1 - b0), 300);
+   579→   579→    c.restore();
+   580→   580→    // boulder
+   581→   581→    if (l.alertT > 1.2 || l.splitT >= 0) {
+   582→   582→      const bx = sx(l.boulderX);
+   583→   583→      const by = l.boulderFall > 0 ? groundY + l.boulderFall * l.boulderFall * 900 : groundY - 64;
+   584→   584→      if (bx > -140) drawBoulder(c, bx, by, 66, this.globalT * 3);
+   585→   585→    }
+   586→   586→    // characters
+   587→   587→    if (l.splitT < 0) {
+   588→   588→      // pink 8 walking
+   589→   589→      const bob = Math.sin(l.walkT * 7) * 5;
+   590→   590→      drawPink8(c, {
+   591→   591→        cx: sx(l.b8x), bottomY: groundY - 26 + bob, scale: 0.7,
+   592→   592→        look: 0.6, mouth: 'grit', time: this.globalT,
+   593→   593→      });
+   594→   594→      drawBadge(c, sx(l.b8x), groundY - 26 + bob - 280, 8, 1);
+   595→   595→    } else if (l.fours > 0) {
+   596→   596→      // two green 4s leapt apart (with apples!)
+   597→   597→      const st = Math.min(1, (l.splitT - 0.55) / 0.7);
+   598→   598→      const ease = 1 - (1 - st) * (1 - st);
+   599→   599→      drawGreen4(c, {
+   600→   600→        cx: 288 - 150 - 90 * ease, bottomY: groundY - 26, scale: 0.72,
+   601→   601→        look: 0.6, mouth: 'smile', apples: 4, time: this.globalT,
+   602→   602→      });
+   603→   603→      drawGreen4(c, {
+   604→   604→        cx: 288 + 150 + 90 * ease, bottomY: groundY - 26, scale: 0.72,
+   605→   605→        look: 0.6, mouth: 'smile', apples: 4, time: this.globalT,
+   606→   606→      });
+   607→   607→      if (st < 1) {
+   608→   608→        drawBadge(c, 288 - 150 - 90 * ease, groundY - 200, 4, 0.9);
+   609→   609→        drawBadge(c, 288 + 150 + 90 * ease, groundY - 200, 4, 0.9);
+   610→   610→      }
+   611→   611→    }
+   612→   612→    c.restore();
+   613→   613→    // split button (icon only)
+   614→   614→    if (l.splitT < 0 && !l.done) {
+   615→   615→      drawSplitButton(c, 288, 900, 74, this.globalT);
+   616→   616→    }
+   617→   617→    this.drawMuteBtn();
+   618→   618→    this.drawParticlesAndShake();
+   619→   619→  }
+   620→   620→
+   621→   621→  // ============================================================
+   622→   622→  // LEVEL 4 - SPLIT IN HALF
+   623→   623→  // ============================================================
+   624→   624→  private tapL4(): void {
+   625→   625→    const l = this.l4;
+   626→   626→    if (l.done || l.failed || l.splitT >= 0) return;
+   627→   627→    const zone = Math.min(l.x1, l.x2);
+   628→   628→    if (zone > 210 && zone < l.tunnelX - 40) {
+   629→   629→      l.splitT = 0;
+   630→   630→      sfxSparkle();
+   631→   631→      sfxWhoosh();
+   632→   632→      say('Four equals two plus two!', { rate: 1.05 });
+   633→   633→    } else {
+   634→   634→      sfxBonk();
+   635→   635→      this.showTooEarlyFlash = 0.8;
+   636→   636→    }
+   637→   637→  }
+   638→   638→
+   639→   639→  private updateL4(dt: number): void {
+   640→   640→    const l = this.l4;
+   641→   641→    this.showTooEarlyFlash = Math.max(0, this.showTooEarlyFlash - dt);
+   642→   642→    l.warnT += dt;
+   643→   643→    if (l.warnT > 1.6 && l.warnT - dt <= 1.6) {
+   644→   644→      say('Split in half!', { rate: 1.0 });
+   645→   645→    }
+   646→   646→    if (l.failed) return;
+   647→   647→    if (l.splitT >= 0) {
+   648→   648→      l.splitT += dt;
+   649→   649→      if (l.splitT > 0.55 && l.twos === 0) {
+   650→   650→        l.twos = 1;
+   651→   651→        spawnSparkles(this.particles, 288, 560, 46, PAL.goldLight);
+   652→   652→        spawnSparkles(this.particles, 288, 560, 20, PAL.orangeLight);
+   653→   653→      }
+   654→   654→      if (l.splitT > 2.4 && !l.done) {
+   655→   655→        l.done = true;
+   656→   656→        this.enterReveal(['4', '=', '2', '+', '2'], () => this.enterIntro(5));
+   657→   657→      }
+   658→   658→      return;
+   659→   659→    }
+   660→   660→    // run right
+   661→   661→    const speed = 150;
+   662→   662→    l.x1 += speed * dt;
+   663→   663→    l.x2 += speed * dt;
+   664→   664→    const lead = Math.min(l.x1, l.x2);
+   665→   665→    if (lead > l.tunnelX - 58) {
+   666→   666→      // hit the tunnel wall
+   667→   667→      l.failed = true;
+   668→   668→      l.bonkT = 0;
+   669→   669→      sfxBonk();
+   670→   670→      this.shake = 0.6;
+   671→   671→      this.enterRetry("THE TUNNEL'S TOO SMALL!");
+   672→   672→    }
+   673→   673→  }
+   674→   674→
+   675→   675→  private drawL4(): void {
+   676→   676→    const c = this.c;
+   677→   677→    const l = this.l4;
+   678→   678→    drawCaveBackground(c, this.globalT);
+   679→   679→    drawSpotlight(c, 288, 0, 300, 1024, 0.15);
+   680→   680→    const groundY = 700;
+   681→   681→    drawPlanks(c, -20, groundY, W + 40, 44);
+   682→   682→    // tunnel arch (only 2s fit)
+   683→   683→    drawTunnelArch(c, l.tunnelX, W - l.tunnelX + 60, groundY, 100);
+   684→   684→    // golden split zone marker (visual only, no words)
+   685→   685→    if (l.splitT < 0 && !l.failed) {
+   686→   686→      c.save();
+   687→   687→      c.strokeStyle = `rgba(255,215,90,${0.55 + Math.sin(this.globalT * 4) * 0.25})`;
+   688→   688→      c.setLineDash([14, 10]);
+   689→   689→      c.lineWidth = 5;
+   690→   690→      c.beginPath();
+   691→   691→      c.moveTo(210, groundY);
+   692→   692→      c.lineTo(210, groundY - 340);
+   693→   693→      c.stroke();
+   694→   694→      c.setLineDash([]);
+   695→   695→      c.restore();
+   696→   696→    }
+   697→   697→    const bob = Math.sin(this.globalT * 9) * 4;
+   698→   698→    if (l.splitT < 0) {
+   699→   699→      // two green 4s running
+   700→   700→      drawGreen4(c, {
+   701→   701→        cx: l.x1, bottomY: groundY - 10 + bob * 0.5, scale: 0.85,
+   702→   702→        look: 0.7, mouth: 'worried', apples: 4, time: this.globalT,
+   703→   703→      });
+   704→   704→      drawGreen4(c, {
+   705→   705→        cx: l.x2, bottomY: groundY - 10 - bob * 0.5, scale: 0.85,
+   706→   706→        look: 0.7, mouth: 'worried', apples: 4, time: this.globalT,
+   707→   707→      });
+   708→   708→      drawBadge(c, l.x1, groundY - 190, 4, 0.8);
+   709→   709→      drawBadge(c, l.x2, groundY - 190, 4, 0.8);
+   710→   710→    } else if (l.twos > 0) {
+   711→   711→      // four orange 2s running through
+   712→   712→      const run = Math.max(0, l.splitT - 0.55) * 260;
+   713→   713→      for (let i = 0; i < 4; i++) {
+   714→   714→        const bx = 100 + i * 88 + run;
+   715→   715→        if (bx < W + 60) {
+   716→   716→          drawOrange2(c, {
+   717→   717→            cx: bx, bottomY: groundY - 8 + Math.sin(this.globalT * 10 + i) * 4, scale: 0.55,
+   718→   718→            look: 0.8, mouth: 'smile', apples: 2, time: this.globalT,
+   719→   719→          });
+   720→   720→        }
+   721→   721→      }
+   722→   722→    }
+   723→   723→    if (l.splitT < 0 && !l.failed) drawSplitButton(c, 288, 900, 74, this.globalT);
+   724→   724→    this.drawMuteBtn();
+   725→   725→    this.drawParticlesAndShake();
+   726→   726→  }
+   727→   727→
+   728→   728→  // ============================================================
+   729→   729→  // LEVEL 5 - THE EXIT (sneak past the giant eye)
+   730→   730→  // ============================================================
+   731→   731→  private tapL5(): void {
+   732→   732→    const l = this.l5;
+   733→   733→    if (l.done) return;
+   734→   734→    if (l.phase === 'pre') {
+   735→   735→      l.phase = 'sneak';
+   736→   736→      sfxSparkle();
+   737→   737→      sfxWhoosh();
+   738→   738→      say('Two equals one plus one!', { rate: 1.0 });
+   739→   739→      return;
+   740→   740→    }
+   741→   741→    if (l.phase !== 'sneak') return;
+   742→   742→    if (l.hopT >= 0) return; // mid-hop
+   743→   743→    if (l.eyeOpen > 0.45) {
+   744→   744→      // caught moving!
+   745→   745→      l.caughtFlash = 0.9;
+   746→   746→      sfxBonk();
+   747→   747→      say('Whoa!', { rate: 1.2, pitch: 0.85 });
+   748→   748→      l.progress = Math.max(0, l.progress - 110);
+   749→   749→      l.lastSafe = l.progress;
+   750→   750→      return;
+   751→   751→    }
+   752→   752→    // hop forward
+   753→   753→    l.hopT = 0;
+   754→   754→    l.progress += 38;
+   755→   755→    sfxSneak();
+   756→   756→  }
+   757→   757→
+   758→   758→  private updateL5(dt: number): void {
+   759→   759→    const l = this.l5;
+   760→   760→    l.caughtFlash = Math.max(0, l.caughtFlash - dt);
+   761→   761→    if (l.hopT >= 0) {
+   762→   762→      l.hopT += dt;
+   763→   763→      if (l.hopT > 0.3) l.hopT = -1;
+   764→   764→    }
+   765→   765→    if (l.phase === 'pre') {
+   766→   766→      l.eyeCycle += dt;
+   767→   767→      return;
+   768→   768→    }
+   769→   769→    if (l.done) {
+   770→   770→      l.doorT += dt;
+   771→   771→      if (l.doorT > 2.2) {
+   772→   772→        this.enterReveal(['2', '=', '1', '+', '1'], () => this.enterIntro(6));
+   773→   773→      }
+   774→   774→      return;
+   775→   775→    }
+   776→   776→    // eye cycle: closed 1.9s -> warn 0.45s -> open 1.35s
+   777→   777→    l.eyeCycle += dt;
+   778→   778→    const closed = 1.9, warn = 0.45, open = 1.35;
+   779→   779→    const t = l.eyeCycle % (closed + warn + open);
+   780→   780→    let target = 0;
+   781→   781→    if (t > closed + warn) target = 1;
+   782→   782→    else if (t > closed) target = 0.18;
+   783→   783→    l.eyeOpen += (target - l.eyeOpen) * Math.min(1, dt * 7);
+   784→   784→    if (t > closed && !l.warnSound) {
+   785→   785→      l.warnSound = true;
+   786→   786→      sfxChime(0.6);
+   787→   787→    }
+   788→   788→    if (t < closed) l.warnSound = false;
+   789→   789→    // reach door?
+   790→   790→    if (l.progress >= 340) {
+   791→   791→      l.done = true;
+   792→   792→      l.doorT = 0;
+   793→   793→      sfxFanfare();
+   794→   794→      say('The coast is clear!', { rate: 1.05 });
+   795→   795→      spawnSparkles(this.particles, 430, 700, 40, PAL.goldLight);
+   796→   796→    }
+   797→   797→  }
+   798→   798→
+   799→   799→  private drawL5(): void {
+   800→   800→    const c = this.c;
+   801→   801→    const l = this.l5;
+   802→   802→    drawCaveBackground(c, this.globalT, 'dark');
+   803→   803→    drawSpotlight(c, 430, 0, 220, 800, 0.18);
+   804→   804→    const groundY = 760;
+   805→   805→    drawPlanks(c, -20, groundY, W + 40, 44);
+   806→   806→    // exit door at right
+   807→   807→    drawExitDoor(c, 430, groundY, l.done ? Math.min(1, l.doorT / 1.4) : 0, this.globalT);
+   808→   808→    // guard eye above door
+   809→   809→    drawGuardEye(c, 430, 300, l.eyeOpen, this.globalT);
+   810→   810→    // characters
+   811→   811→    const baseX = 90 + l.progress;
+   812→   812→    if (l.phase === 'pre') {
+   813→   813→      // four orange 2s waiting
+   814→   814→      for (let i = 0; i < 4; i++) {
+   815→   815→        drawOrange2(c, {
+   816→   816→          cx: 80 + i * 66, bottomY: groundY - 8 + Math.sin(this.globalT * 4 + i) * 3, scale: 0.52,
+   817→   817→          look: 0.8, mouth: 'worried', apples: 2, time: this.globalT,
+   818→   818→        });
+   819→   819→      }
+   820→   820→      drawBadge(c, 212, groundY - 160, 2, 0.8);
+   821→   821→    } else {
+   822→   822→      // eight red 1s sneaking in a line (leader first)
+   823→   823→      for (let i = 0; i < 8; i++) {
+   824→   824→        const delay = i * 0.02;
+   825→   825→        const h = l.hopT >= 0 ? Math.max(0, Math.sin(((l.hopT - delay) / 0.3) * Math.PI)) * 26 : 0;
+   826→   826→        drawRed1(c, {
+   827→   827→          cx: baseX - i * 34, bottomY: groundY - 8 - h, scale: 0.44 + (i % 2) * 0.02,
+   828→   828→          look: 0.9, mouth: l.caughtFlash > 0 ? 'oh' : 'grit', apples: 1, time: this.globalT,
+   829→   829→        });
+   830→   830→      }
+   831→   831→      drawBadge(c, baseX, groundY - 105, 1, 0.7);
+   832→   832→    }
+   833→   833→    // danger flash (visual only)
+   834→   834→    if (l.caughtFlash > 0) {
+   835→   835→      c.save();
+   836→   836→      c.globalAlpha = l.caughtFlash * 0.35;
+   837→   837→      c.fillStyle = PAL.red;
+   838→   838→      c.fillRect(0, 0, W, H);
+   839→   839→      c.restore();
+   840→   840→    }
+   841→   841→    // golden warning glow around the eye when open
+   842→   842→    if (l.eyeOpen > 0.45 && !l.done) {
+   843→   843→      c.save();
+   844→   844→      c.strokeStyle = `rgba(255,215,90,${0.4 + Math.sin(this.globalT * 9) * 0.25})`;
+   845→   845→      c.lineWidth = 7;
+   846→   846→      c.beginPath();
+   847→   847→      c.arc(430, 300, 128, 0, Math.PI * 2);
+   848→   848→      c.stroke();
+   849→   849→      c.restore();
+   850→   850→    }
+   851→   851→    if (l.phase === 'pre') {
+   852→   852→      drawSplitButton(c, 288, 900, 74, this.globalT);
+   853→   853→    } else if (!l.done) {
+   854→   854→      drawSplitButton(c, 288, 900, 74, this.globalT, 'HOP');
+   855→   855→    }
+   856→   856→    this.drawMuteBtn();
+   857→   857→    this.drawParticlesAndShake();
+   858→   858→  }
+   859→   859→
+   860→   860→  // ============================================================
+   861→   861→  // LEVEL 6 - ESCAPE (merge-up celebration)
+   862→   862→  // ============================================================
+   863→   863→  private tapL6(): void {
+   864→   864→    if (this.l6.stage >= 4) {
+   865→   865→      this.enterIntro(1);
+   866→   866→    }
+   867→   867→  }
+   868→   868→
+   869→   869→  private updateL6(dt: number): void {
+   870→   870→    const l = this.l6;
+   871→   871→    l.t += dt;
+   872→   872→    l.confettiT -= dt;
+   873→   873→    if (l.confettiT <= 0 && l.stage >= 3) {
+   874→   874→      l.confettiT = 0.5;
+   875→   875→      spawnSparkles(this.particles, Math.random() * W, -10, 14, [PAL.gold, PAL.pink, PAL.green, PAL.orange, PAL.water][Math.floor(Math.random() * 5)]);
+   876→   876→    }
+   877→   877→    // staged merges: ones -> twos -> fours -> eight
+   878→   878→    const stages = [1.2, 2.6, 4.0, 5.6];
+   879→   879→    if (l.stage < 4 && l.t > stages[l.stage]) {
+   880→   880→      l.stage++;
+   881→   881→      sfxSparkle();
+   882→   882→      spawnSparkles(this.particles, 288, 500, 40, PAL.goldLight);
+   883→   883→      if (l.stage === 1) { say('Two equals one plus one!', { rate: 1.1 }); sfxBoom(); }
+   884→   884→      if (l.stage === 2) { say('Four equals two plus two!', { rate: 1.1 }); sfxBoom(); }
+   885→   885→      if (l.stage === 3) { say('And four plus four equals eight!', { rate: 1.1 }); sfxBoom(); }
+   886→   886→      if (l.stage === 4) {
+   887→   887→        say('One, two, three, four, five, six, seven, eight! We escaped!', { rate: 1.0 });
+   888→   888→        sfxFanfare();
+   889→   889→        startMusic();
+   890→   890→      }
+   891→   891→    }
+   892→   892→  }
+   893→   893→
+   894→   894→  private drawL6(): void {
+   895→   895→    const c = this.c;
+   896→   896→    const l = this.l6;
+   897→   897→    const openT = Math.min(1, l.t / 1.1);
+   898→   898→    // tropical scene fills screen
+   899→   899→    c.save();
+   900→   900→    const sky = c.createLinearGradient(0, 0, 0, H);
+   901→   901→    sky.addColorStop(0, PAL.skyTop);
+   902→   902→    sky.addColorStop(0.7, '#e8f8ea');
+   903→   903→    sky.addColorStop(1, PAL.sand);
+   904→   904→    c.fillStyle = sky;
+   905→   905→    c.fillRect(0, 0, W, H);
+   906→   906→    // sea
+   907→   907→    c.fillStyle = PAL.water;
+   908→   908→    c.fillRect(0, 520, W, 130);
+   909→   909→    const shimmer = c.createLinearGradient(0, 520, 0, 650);
+   910→   910→    shimmer.addColorStop(0, 'rgba(255,255,255,0.5)');
+   911→   911→    shimmer.addColorStop(1, 'rgba(255,255,255,0)');
+   912→   912→    c.fillStyle = shimmer;
+   913→   913→    c.fillRect(0, 520, W, 130);
+   914→   914→    // sand foreground
+   915→   915→    c.fillStyle = PAL.sand;
+   916→   916→    c.beginPath();
+   917→   917→    c.ellipse(288, 1020, 420, 220, 0, Math.PI, 0);
+   918→   918→    c.fill();
+   919→   919→    // palms
+   920→   920→    for (const [px, s] of [[60, 1.1], [510, 1.2], [120, 0.8]] as Array<[number, number]>) {
+   921→   921→      c.strokeStyle = PAL.palmTrunk;
+   922→   922→      c.lineWidth = 14 * s;
+   923→   923→      c.lineCap = 'round';
+   924→   924→      c.beginPath();
+   925→   925→      c.moveTo(px, 660);
+   926→   926→      c.quadraticCurveTo(px + 16 * s, 660 - 130 * s, px + 6 * s, 660 - 210 * s);
+   927→   927→      c.stroke();
+   928→   928→      const top = { x: px + 6 * s, y: 660 - 210 * s };
+   929→   929→      const sway = Math.sin(this.globalT * 1.4 + px) * 6;
+   930→   930→      for (let i = 0; i < 6; i++) {
+   931→   931→        const a = (-1.1 + i * 0.44) + sway * 0.012;
+   932→   932→        c.strokeStyle = i % 2 === 0 ? PAL.palmLeaf : PAL.palmLeafPink;
+   933→   933→        c.lineWidth = 13 * s;
+   934→   934→        c.beginPath();
+   935→   935→        c.moveTo(top.x, top.y);
+   936→   936→        c.quadraticCurveTo(
+   937→   937→          top.x + Math.cos(a) * 52 * s, top.y + Math.sin(a) * 34 * s - 14,
+   938→   938→          top.x + Math.cos(a) * 96 * s, top.y + Math.sin(a) * 66 * s + 12
+   939→   939→        );
+   940→   940→        c.stroke();
+   941→   941→      }
+   942→   942→    }
+   943→   943→    c.restore();
+   944→   944→    // characters by stage
+   945→   945→    const bob = Math.sin(this.globalT * 5) * 8;
+   946→   946→    const gy = 830;
+   947→   947→    if (l.stage === 0) {
+   948→   948→      for (let i = 0; i < 8; i++) {
+   949→   949→        drawRed1(c, {
+   950→   950→          cx: 130 + (i % 4) * 105, bottomY: gy - Math.floor(i / 4) * 70 + (i < 4 ? bob : -bob),
+   951→   951→          scale: 0.62, look: 0.4, mouth: 'smile', apples: 1, time: this.globalT,
+   952→   952→        });
+   953→   953→      }
+   954→   954→      drawEquation(c, ['2', '=', '1', '+', '1'], 288, 430, 0.9);
+   955→   955→    } else if (l.stage === 1) {
+   956→   956→      for (let i = 0; i < 4; i++) {
+   957→   957→        drawOrange2(c, {
+   958→   958→          cx: 150 + i * 95, bottomY: gy + (i % 2 ? bob : -bob),
+   959→   959→          scale: 0.72, look: 0.3, mouth: 'smile', apples: 2, time: this.globalT,
+   960→   960→        });
+   961→   961→      }
+   962→   962→      drawEquation(c, ['4', '=', '2', '+', '2'], 288, 430, 0.9);
+   963→   963→    } else if (l.stage === 2) {
+   964→   964→      drawGreen4(c, { cx: 190, bottomY: gy + bob, scale: 0.9, look: 0.3, mouth: 'smile', apples: 4, armsUp: true, time: this.globalT });
+   965→   965→      drawGreen4(c, { cx: 386, bottomY: gy - bob, scale: 0.9, look: 0.3, mouth: 'smile', apples: 4, armsUp: true, time: this.globalT });
+   966→   966→      drawEquation(c, ['8', '=', '4', '+', '4'], 288, 430, 0.9);
+   967→   967→    } else {
+   968→   968→      const dance = Math.sin(this.globalT * 6) * 14;
+   969→   969→      const bottom = gy - 40 + Math.abs(dance) * 0.4;
+   970→   970→      drawPink8(c, {
+   971→   971→        cx: 288, bottomY: bottom, scale: 1.0,
+   972→   972→        look: 0, mouth: 'smile', apples: 8, armsUp: true, time: this.globalT, squash: Math.abs(Math.sin(this.globalT * 6)) * 0.3,
+   973→   973→      });
+   974→   974→      drawBadge(c, 288, bottom - 300, 8, 1.2);
+   975→   975→      if (l.stage >= 4) {
+   976→   976→        // replay icon (circular arrow), pulsing
+   977→   977→        const pulse = 1 + Math.sin(this.globalT * 4) * 0.08;
+   978→   978→        c.save();
+   979→   979→        c.translate(288, 930);
+   980→   980→        c.scale(pulse, pulse);
+   981→   981→        c.strokeStyle = PAL.goldLight;
+   982→   982→        c.lineWidth = 6;
+   983→   983→        c.lineCap = 'round';
+   984→   984→        c.beginPath();
+   985→   985→        c.arc(0, 0, 26, -0.4, Math.PI * 1.55);
+   986→   986→        c.stroke();
+   987→   987→        c.fillStyle = PAL.goldLight;
+   988→   988→        c.beginPath();
+   989→   989→        c.moveTo(30, -14);
+   990→   990→        c.lineTo(34, 8);
+   991→   991→        c.lineTo(12, 0);
+   992→   992→        c.closePath();
+   993→   993→        c.fill();
+   994→   994→        c.restore();
+   995→   995→      }
+   996→   996→    }
+   997→   997→    this.drawMuteBtn();
+   998→   998→    this.drawParticlesAndShake();
+   999→   999→  }
+  1000→  1000→
+  1001→  1001→  // ============================================================
+  1002→  1002→  // SHARED SCREENS
+  1003→  1003→  // ============================================================
+  1004→  1004→  private drawTitle(): void {
+  1005→  1005→    const c = this.c;
+  1006→  1006→    // the video's opening scene: golden door, seesaw, two green 4s
+  1007→  1007→    drawCaveBackground(c, this.globalT);
+  1008→  1008→    drawSpotlight(c, 288, 0, 260, 780, 0.22);
+  1009→  1009→    drawGoldenDoor(c, 288, 640, 96, 150, 0.4 + 0.6 * Math.abs(Math.sin(this.globalT * 0.7)));
+  1010→  1010→    drawBallPit(c, 770, 254, this.globalT);
+  1011→  1011→    const sway = Math.sin(this.globalT * 0.9) * 0.12;
+  1012→  1012→    drawSeesaw(c, 288, 640, 216, sway);
+  1013→  1013→    const sa = Math.sin(sway);
+  1014→  1014→    const ca = Math.cos(sway);
+  1015→  1015→    const bobA = Math.sin(this.globalT * 2.2) * 3;
+  1016→  1016→    drawGreen4(c, { cx: 288 - 200 * ca, bottomY: 640 - 200 * sa - 9 + bobA, scale: 0.78, look: 0, mouth: 'smile', time: this.globalT });
+  1017→  1017→    drawGreen4(c, { cx: 288 + 200 * ca, bottomY: 640 + 200 * sa - 9 - bobA, scale: 0.78, look: 0, mouth: 'smile', time: this.globalT });
+  1018→  1018→    // the only words in the game: the equation
+  1019→  1019→    drawChipEquation(c, 92, 96, ['4', '+', '4']);
+  1020→  1020→    // pulsing tap ripple
+  1021→  1021→    const ripple = (this.globalT % 1.2) / 1.2;
+  1022→  1022→    c.save();
+  1023→  1023→    c.strokeStyle = `rgba(255,215,102,${(1 - ripple) * 0.7})`;
+  1024→  1024→    c.lineWidth = 4;
+  1025→  1025→    c.beginPath();
+  1026→  1026→    c.arc(288, 905, 20 + ripple * 44, 0, Math.PI * 2);
+  1027→  1027→    c.stroke();
+  1028→  1028→    c.fillStyle = 'rgba(20,14,6,0.75)';
+  1029→  1029→    c.beginPath();
+  1030→  1030→    c.arc(288, 905, 26, 0, Math.PI * 2);
+  1031→  1031→    c.fill();
+  1032→  1032→    c.strokeStyle = PAL.gold;
+  1033→  1033→    c.lineWidth = 3;
+  1034→  1034→    c.stroke();
+  1035→  1035→    // pointing-hand icon
+  1036→  1036→    c.fillStyle = PAL.goldLight;
+  1037→  1037→    roundRect(c, 282, 890, 12, 22, 6);
+  1038→  1038→    c.fill();
+  1039→  1039→    c.beginPath();
+  1040→  1040→    c.arc(288, 886, 7, 0, Math.PI * 2);
+  1041→  1041→    c.fill();
+  1042→  1042→    c.restore();
+  1043→  1043→    this.drawMuteBtn();
+  1044→  1044→  }
+  1045→  1045→
+  1046→  1046→  private drawIntro(): void {
+  1047→  1047→    const c = this.c;
+  1048→  1048→    // quick equation card, exactly like the show's reveal cards
+  1049→  1049→    drawStarburst(c, this.globalT);
+  1050→  1050→    const info = LEVELS[this.level - 1];
+  1051→  1051→    const fade = Math.min(1, this.stateT / 0.25);
+  1052→  1052→    c.save();
+  1053→  1053→    c.globalAlpha = fade;
+  1054→  1054→    if (info.equation) {
+  1055→  1055→      drawEquation(c, info.equation.split(' '), 288, 470, 1.05);
+  1056→  1056→    }
+  1057→  1057→    c.restore();
+  1058→  1058→    // mini characters popping in
+  1059→  1059→    const pop = Math.min(1, this.stateT / 0.3);
+  1060→  1060→    c.save();
+  1061→  1061→    c.globalAlpha = pop;
+  1062→  1062→    c.translate(288, 660);
+  1063→  1063→    const s = 0.9 + Math.sin(this.stateT * 6) * 0.05;
+  1064→  1064→    c.scale(s, s);
+  1065→  1065→    const b = Math.sin(this.globalT * 4);
+  1066→  1066→    if (this.level === 1) {
+  1067→  1067→      drawGreen4(c, { cx: -90, bottomY: 90 + b * 4, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1068→  1068→      drawGreen4(c, { cx: 90, bottomY: 90 - b * 4, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1069→  1069→    } else if (this.level === 2) {
+  1070→  1070→      drawPink8(c, { cx: 0, bottomY: 120 + b * 4, scale: 0.45, look: 0, mouth: 'grit', time: this.globalT });
+  1071→  1071→      drawApple(c, 0, -20, 30, true, this.globalT);
+  1072→  1072→    } else if (this.level === 3) {
+  1073→  1073→      drawPink8(c, { cx: -60, bottomY: 110, scale: 0.45, look: 0.5, mouth: 'worried', time: this.globalT });
+  1074→  1074→      drawBoulder(c, 80, 60, 52, this.globalT);
+  1075→  1075→    } else if (this.level === 4) {
+  1076→  1076→      drawGreen4(c, { cx: -80, bottomY: 100 + b * 4, scale: 0.5, look: 0.6, mouth: 'worried', time: this.globalT });
+  1077→  1077→      drawOrange2(c, { cx: 80, bottomY: 100 - b * 4, scale: 0.5, look: 0.6, mouth: 'smile', time: this.globalT });
+  1078→  1078→    } else if (this.level === 5) {
+  1079→  1079→      drawOrange2(c, { cx: -80, bottomY: 100 + b * 4, scale: 0.5, look: 0.7, mouth: 'grit', time: this.globalT });
+  1080→  1080→      drawGuardEye(c, 90, -60, 0.5, this.globalT);
+  1081→  1081→    }
+  1082→  1082→    c.restore();
+  1083→  1083→  }
+  1084→  1084→
+  1085→  1085→  private drawReveal(): void {
+  1086→  1086→    const c = this.c;
+  1087→  1087→    drawStarburst(c, this.globalT);
+  1088→  1088→    const parts = this.revealParts;
+  1089→  1089→    c.save();
+  1090→  1090→    const text = parts.join(' ');
+  1091→  1091→    // auto-fit: shrink long text to fit the screen
+  1092→  1092→    let size = 84;
+  1093→  1093→    c.font = `900 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  1094→  1094→    while (c.measureText(text).width > 520 && size > 28) {
+  1095→  1095→      size -= 4;
+  1096→  1096→      c.font = `900 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  1097→  1097→    }
+  1098→  1098→    c.textAlign = 'center';
+  1099→  1099→    c.textBaseline = 'middle';
+  1100→  1100→    c.fillStyle = PAL.black;
+  1101→  1101→    c.fillText(text, 288, 470);
+  1102→  1102→    c.restore();
+  1103→  1103→    // mini characters
+  1104→  1104→    const pop = Math.min(1, this.stateT / 0.3);
+  1105→  1105→    c.save();
+  1106→  1106→    c.globalAlpha = pop;
+  1107→  1107→    c.translate(288, 660);
+  1108→  1108→    const s = 0.9 + Math.sin(this.stateT * 6) * 0.05;
+  1109→  1109→    c.scale(s, s);
+  1110→  1110→    if (this.level === 1) drawPink8(c, { cx: 0, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', armsUp: true, time: this.globalT });
+  1111→  1111→    else if (this.level === 2) drawApple(c, 0, 0, 34, true, this.globalT);
+  1112→  1112→    else if (this.level === 3) {
+  1113→  1113→      drawGreen4(c, { cx: -80, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 4, time: this.globalT });
+  1114→  1114→      drawGreen4(c, { cx: 80, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 4, time: this.globalT });
+  1115→  1115→    } else if (this.level === 4) {
+  1116→  1116→      drawOrange2(c, { cx: -70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 2, time: this.globalT });
+  1117→  1117→      drawOrange2(c, { cx: 0, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 2, time: this.globalT });
+  1118→  1118→      drawOrange2(c, { cx: 70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 2, time: this.globalT });
+  1119→  1119→    } else if (this.level === 5) {
+  1120→  1120→      drawRed1(c, { cx: -70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1121→  1121→      drawRed1(c, { cx: 0, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1122→  1122→      drawRed1(c, { cx: 70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1123→  1123→    }
+  1124→  1124→    c.restore();
+  1125→  1125→    // sparkles during reveal
+  1126→  1126→    drawParticles(this.c, this.particles);
+  1127→  1127→  }
+  1128→  1128→
+  1129→  1129→  private drawRetry(): void {
+  1130→  1130→    const c = this.c;
+  1131→  1131→    // word-free fail overlay: dark + red pulse + exclamation mark
+  1132→  1132→    const k = Math.min(1, this.stateT / 0.25);
+  1133→  1133→    c.save();
+  1134→  1134→    c.globalAlpha = k * 0.82;
+  1135→  1135→    c.fillStyle = 'rgba(10,6,2,0.9)';
+  1136→  1136→    c.fillRect(0, 0, W, H);
+  1137→  1137→    c.restore();
+  1138→  1138→    const pulse = 1 + Math.sin(this.stateT * 8) * 0.05;
+  1139→  1139→    c.save();
+  1140→  1140→    c.translate(288, 470);
+  1141→  1141→    c.scale(pulse, pulse);
+  1142→  1142→    c.fillStyle = PAL.redLight;
+  1143→  1143→    roundRect(c, -17, -90, 34, 130, 17);
+  1144→  1144→    c.fill();
+  1145→  1145→    c.beginPath();
+  1146→  1146→    c.arc(0, 74, 18, 0, Math.PI * 2);
+  1147→  1147→    c.fill();
+  1148→  1148→    c.restore();
+  1149→  1149→  }
+  1150→  1150→
+  1151→  1151→  // ============================================================
+  1152→  1152→  // HUD helpers
+  1153→  1153→  // ============================================================
+  1154→  1154→  private drawMuteBtn(): void {
+  1155→  1155→    const c = this.c;
+  1156→  1156→    c.save();
+  1157→  1157→    c.fillStyle = 'rgba(20,16,10,0.7)';
+  1158→  1158→    c.beginPath();
+  1159→  1159→    c.arc(522, 46, 26, 0, Math.PI * 2);
+  1160→  1160→    c.fill();
+  1161→  1161→    c.strokeStyle = 'rgba(255,235,180,0.6)';
+  1162→  1162→    c.lineWidth = 2;
+  1163→  1163→    c.stroke();
+  1164→  1164→    // speaker icon
+  1165→  1165→    c.fillStyle = isMuted() ? 'rgba(255,235,180,0.45)' : PAL.goldLight;
+  1166→  1166→    c.beginPath();
+  1167→  1167→    c.moveTo(510, 41);
+  1168→  1168→    c.lineTo(517, 41);
+  1169→  1169→    c.lineTo(524, 34);
+  1170→  1170→    c.lineTo(524, 58);
+  1171→  1171→    c.lineTo(517, 51);
+  1172→  1172→    c.lineTo(510, 51);
+  1173→  1173→    c.closePath();
+  1174→  1174→    c.fill();
+  1175→  1175→    if (isMuted()) {
+  1176→  1176→      c.strokeStyle = PAL.redLight;
+  1177→  1177→      c.lineWidth = 3.5;
+  1178→  1178→      c.lineCap = 'round';
+  1179→  1179→      c.beginPath();
+  1180→  1180→      c.moveTo(530, 38);
+  1181→  1181→      c.lineTo(542, 54);
+  1182→  1182→      c.moveTo(542, 38);
+  1183→  1183→      c.lineTo(530, 54);
+  1184→  1184→      c.stroke();
+  1185→  1185→    } else {
+  1186→  1186→      c.strokeStyle = PAL.goldLight;
+  1187→  1187→      c.lineWidth = 2.6;
+  1188→  1188→      c.lineCap = 'round';
+  1189→  1189→      c.beginPath();
+  1190→  1190→      c.arc(527, 46, 6, -0.7, 0.7);
+  1191→  1191→      c.stroke();
+  1192→  1192→      c.beginPath();
+  1193→  1193→      c.arc(527, 46, 11, -0.6, 0.6);
+  1194→  1194→      c.stroke();
+  1195→  1195→    }
+  1196→  1196→    c.restore();
+  1197→  1197→  }
+  1198→  1198→
+  1199→  1199→  private drawParticlesAndShake(): void {
+  1200→  1200→    drawParticles(this.c, this.particles);
+  1201→  1201→    if (this.shake > 0) this.shake = Math.max(0, this.shake - 0.016);
+  1202→  1202→  }
+  1203→  1203→
+  1204→  1204→  // ============================================================
+  1205→  1205→  // MAIN LOOP
+  1206→  1206→  // ============================================================
+  1207→  1207→  private loop(ts: number): void {
+  1208→  1208→    this.raf = requestAnimationFrame(this.loop);
+  1209→  1209→    if (!this.lastT) this.lastT = ts;
+  1210→  1210→    let dt = (ts - this.lastT) / 1000;
+  1211→  1211→    this.lastT = ts;
+  1212→  1212→    if (dt > 0.05) dt = 0.05;
+  1213→  1213→    this.globalT += dt;
+  1214→  1214→    this.stateT += dt;
+  1215→  1215→
+  1216→  1216→    const c = this.c;
+  1217→  1217→    // scale design space
+  1218→  1218→    const dpr = Math.min(2, window.devicePixelRatio || 1);
+  1219→  1219→    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  1220→  1220→    const rect = this.canvas.getBoundingClientRect();
+  1221→  1221→    const sx = rect.width / W;
+  1222→  1222→    const sy = rect.height / H;
+  1223→  1223→    c.setTransform(dpr * sx, 0, 0, dpr * sy, 0, 0);
+  1224→  1224→
+  1225→  1225→    // letterbox bg
+  1226→  1226→    c.fillStyle = PAL.bgDark;
+  1227→  1227→    c.fillRect(0, 0, W, H);
+  1228→  1228→
+  1229→  1229→    updateParticles(this.particles, dt * this.timeScale, 300);
+  1230→  1230→
+  1231→  1231→    switch (this.state) {
+  1232→  1232→      case 'title':
+  1233→  1233→        this.drawTitle();
+  1234→  1234→        break;
+  1235→  1235→      case 'intro':
+  1236→  1236→        this.drawIntro();
+  1237→  1237→        if (this.stateT > 1.6) this.startLevel(this.level); // auto-advance, no words
+  1238→  1238→        break;
+  1239→  1239→      case 'reveal': {
+  1240→  1240→        this.drawReveal();
+  1241→  1241→        if (this.stateT > 1.9 && this.pendingNext) {
+  1242→  1242→          const next = this.pendingNext;
+  1243→  1243→          this.pendingNext = null;
+  1244→  1244→          next();
+  1245→  1245→        }
+  1246→  1246→        break;
+  1247→  1247→      }
+  1248→  1248→      case 'retry': {
+  1249→  1249→        // keep drawing the level behind
+  1250→  1250→        this.drawLevelFrozen();
+  1251→  1251→        this.drawRetry();
+  1252→  1252→        if (this.stateT > 1.4) {
+  1253→  1253→          this.startLevel(this.level);
+  1254→  1254→        }
+  1255→  1255→        break;
+  1256→  1256→      }
+  1257→  1257→      case 'win':
+  1258→  1258→        this.drawL6();
+  1259→  1259→        break;
+  1260→  1260→      case 'play':
+  1261→  1261→        this.updatePlay(dt);
+  1262→  1262→        this.drawPlay();
+  1263→  1263→        break;
+  1264→  1264→    }
+  1265→  1265→  }
+  1266→  1266→
+  1267→  1267→  private drawLevelFrozen(): void {
+  1268→  1268→    // draw the last level frame statically behind retry overlay
+  1269→  1269→    if (this.level === 1) this.drawL1();
+  1270→  1270→    else if (this.level === 2) this.drawL2();
+  1271→  1271→    else if (this.level === 3) this.drawL3();
+  1272→  1272→    else if (this.level === 4) this.drawL4();
+  1273→  1273→    else if (this.level === 5) this.drawL5();
+  1274→  1274→    else this.drawL6();
+  1275→  1275→  }
+  1276→  1276→
+  1277→  1277→  private updatePlay(dt: number): void {
+  1278→  1278→    const d = dt * this.timeScale;
+  1279→  1279→    if (this.level === 1) this.updateL1(d);
+  1280→  1280→    else if (this.level === 2) this.updateL2(d);
+  1281→  1281→    else if (this.level === 3) this.updateL3(d);
+  1282→  1282→    else if (this.level === 4) this.updateL4(d);
+  1283→  1283→    else if (this.level === 5) this.updateL5(d);
+  1284→  1284→    else if (this.level === 6) this.updateL6(d);
+  1285→  1285→  }
+  1286→  1286→
+  1287→  1287→  private drawPlay(): void {
+  1288→  1288→    if (this.level === 1) this.drawL1();
+  1289→  1289→    else if (this.level === 2) this.drawL2();
+  1290→  1290→    else if (this.level === 3) this.drawL3();
+  1291→  1291→    else if (this.level === 4) this.drawL4();
+  1292→  1292→    else if (this.level === 5) this.drawL5();
+  1293→  1293→    else if (this.level === 6) this.drawL6();
+  1294→  1294→  }
+  1295→  1295→}
+  1296→  1296→

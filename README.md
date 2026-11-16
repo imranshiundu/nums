@@ -1,8 +1,8 @@
-# Number Temple Escape
+# NUMS
 
 A live playable numbers adventure, rebuilt 1:1 from the reference video (`upload/numbers.mp4`).
 
-**Play now: <https://imranshiundu.github.io/number-temple-escape/>**
+**Play now: <https://imranshiundu.github.io/nums/>**
 
 - Same scenes: the golden seesaw balance, the golden apple climb, the giant boulder, the low tunnel, the giant eye, the jungle escape
 - Same rules: `4 + 4 = 8`, `8 = 4 + 4`, `4 = 2 + 2`, `2 = 1 + 1`
@@ -18,5 +18,5 @@ bun run dev          # http://localhost:3000
 ## Build for GitHub Pages
 
 ```bash
-STATIC_EXPORT=1 bun run build   # outputs ./out
+STATIC_EXPORT=1 bunx next build   # outputs ./out
 ```

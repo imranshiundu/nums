@@ -1,5 +1,5 @@
-import NumberTempleGame from '@/components/NumberTempleGame';
+import NumsGame from '@/components/NumsGame';
 
 export default function Home() {
-  return <NumberTempleGame />;
+  return <NumsGame />;
 }

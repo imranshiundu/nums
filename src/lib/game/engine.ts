@@ -1,5 +1,5 @@
 // ============================================================
-// NUMBER TEMPLE ESCAPE - Game Engine
+// NUMS - Numbers Adventure (Game Engine)
 // 6 levels mirroring the source video:
 //  1. THE BALANCE        - two green 4s balance a golden seesaw -> merge 4+4=8
 //  2. APPLE CLIMB        - pink 8 climbs & catches 8 golden apples (voice counts)
@@ -122,7 +122,7 @@ export class Game {
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
     // debug/testing handle (also lets power users inspect state)
-    (window as unknown as { __ntGame?: Game }).__ntGame = this;
+    (window as unknown as { __numsGame?: Game }).__numsGame = this;
   }
 
   destroy(): void {
@@ -259,7 +259,7 @@ export class Game {
     const good = side === highSide || Math.abs(l.angle) <= 0.035;
     if (good) {
       l.count++;
-      l.angVel += side * 1.5;
+      l.angVel += side * 1.9;
       if (side < 0) l.bounceL = 1; else l.bounceR = 1;
       sfxTap(1 + (l.count % 3) * 0.12);
       sfxBoing(side < 0 ? 1.1 : 0.9);
@@ -286,10 +286,10 @@ export class Game {
     if (l.bounceR > 0) l.bounceR = Math.max(0, l.bounceR - dt * 4);
     if (!l.merged) {
       // destabilizing beam physics + gentle wind gusts (tuned to be fair)
-      l.angVel += (l.angle * 1.2 + Math.sin(l.windT * 1.7) * 0.35) * dt * 2.0;
-      l.angVel *= 0.955;
+      l.angVel += (l.angle * 0.9 + Math.sin(l.windT * 1.7) * 0.22) * dt * 2.0;
+      l.angVel *= 0.93;
       l.angle += l.angVel * dt * 0.5;
-      if (Math.abs(l.angle) > 0.72) {
+      if (Math.abs(l.angle) > 0.88) {
         this.enterRetry('THE BLOCKS SLID OFF!');
         return;
       }
@@ -354,6 +354,25 @@ export class Game {
     // equation, exactly like the video: "4 + 4"
     const chips: Array<'4' | '+' | '=' | '8' | '?'> = l.merged ? ['4', '+', '4', '=', '8'] : ['4', '+', '4'];
     drawChipEquation(c, 92, 96, chips);
+    // golden hint arrow above the raised block (tap that side!)
+    if (!l.merged && Math.abs(l.angle) > 0.04) {
+      const hintSide = l.angle > 0.035 ? -1 : 1;
+      const hx = 288 + hintSide * 200;
+      const hy = 330 + Math.sin(this.globalT * 5) * 10;
+      c.save();
+      c.fillStyle = PAL.goldLight;
+      c.strokeStyle = 'rgba(30,18,6,0.85)';
+      c.lineWidth = 4;
+      c.lineJoin = 'round';
+      c.beginPath();
+      c.moveTo(hx - 34, hy);
+      c.lineTo(hx + 34, hy);
+      c.lineTo(hx, hy + 46);
+      c.closePath();
+      c.fill();
+      c.stroke();
+      c.restore();
+    }
     this.drawMuteBtn();
     this.drawParticlesAndShake();
   }
@@ -1017,6 +1036,39 @@ export class Game {
     drawGreen4(c, { cx: 288 + 200 * ca, bottomY: 640 + 200 * sa - 9 - bobA, scale: 0.78, look: 0, mouth: 'smile', time: this.globalT });
     // the only words in the game: the equation
     drawChipEquation(c, 92, 96, ['4', '+', '4']);
+    // game name logo: NUMS - golden chunky waving letters
+    c.save();
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const logo = 'NUMS';
+    let size = 120;
+    c.font = `900 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+    while (logo.split('').reduce((w, ch) => w + c.measureText(ch).width, 0) + 90 > 540 && size > 60) {
+      size -= 6;
+      c.font = `900 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+    }
+    const widths = logo.split('').map((ch) => c.measureText(ch).width);
+    const gap = 22;
+    const totalW = widths.reduce((a, b) => a + b, 0) + gap * (logo.length - 1);
+    let lx = 288 - totalW / 2;
+    for (let i = 0; i < logo.length; i++) {
+      const wave = Math.sin(this.globalT * 2.4 + i * 0.85) * 10;
+      const x = lx + widths[i] / 2;
+      const y = 250 + wave;
+      const g = c.createLinearGradient(x, y - size / 2, x, y + size / 2);
+      g.addColorStop(0, '#ffe9a8');
+      g.addColorStop(0.45, PAL.gold);
+      g.addColorStop(1, PAL.goldDark);
+      c.fillStyle = 'rgba(15,9,3,0.85)';
+      c.fillText(logo[i], x + 5, y + 7);
+      c.fillStyle = g;
+      c.fillText(logo[i], x, y);
+      c.strokeStyle = 'rgba(80,45,8,0.9)';
+      c.lineWidth = 2.5;
+      c.strokeText(logo[i], x, y);
+      lx += widths[i] + gap;
+    }
+    c.restore();
     // pulsing tap ripple
     const ripple = (this.globalT % 1.2) / 1.2;
     c.save();

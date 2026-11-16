@@ -20,7 +20,7 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Number Temple Escape",
+  title: "NUMS - Numbers Adventure",
   description: "A live playable numbers adventure: balance, climb, split and escape the temple - 4 + 4 = 8!",
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",

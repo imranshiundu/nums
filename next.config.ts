@@ -5,7 +5,7 @@ const isStatic = process.env.STATIC_EXPORT === "1";
 
 const nextConfig: NextConfig = {
   output: isStatic ? "export" : "standalone",
-  basePath: isStatic ? "/number-temple-escape" : undefined,
+  basePath: isStatic ? "/nums" : undefined,
   images: { unoptimized: true },
   typescript: {
     ignoreBuildErrors: true,
