@@ -1,0 +1,1355 @@
+     1→// ============================================================
+     2→// NUMBER TEMPLE ESCAPE - Game Engine
+     3→// 6 levels mirroring the source video:
+     4→//  1. THE BALANCE        - two green 4s balance a golden seesaw -> merge 4+4=8
+     5→//  2. APPLE CLIMB        - pink 8 climbs & catches 8 golden apples (voice counts)
+     6→//  3. GIANT ROAMING      - boulder chase, tap SPLIT: 8 = 4 + 4
+     7→//  4. SPLIT IN HALF      - low tunnel: tap SPLIT: 4 = 2 + 2
+     8→//  5. THE EXIT           - sneak past the giant eye: 2 = 1 + 1
+     9→//  6. ESCAPE             - tropical paradise, merge-up celebration 1..8
+    10→// Design space: 576 x 1024
+    11→// ============================================================
+    12→
+    13→import {
+    14→  PAL, Ctx,
+    15→  roundRect,
+    16→  drawGreen4, drawPink8, drawOrange2, drawRed1,
+    17→  drawCaveBackground, drawSpotlight, drawGoldenDoor, drawPlanks,
+    18→  drawBallPit, drawSeesaw, drawBoulder, drawBridge, drawTunnelArch,
+    19→  drawGuardEye, drawExitDoor, drawBadge,
+    20→  drawStarburst, drawEquation, drawChipEquation, drawAppleCounter,
+    21→  drawProgressBar, drawSplitButton, drawBanner, drawApple,
+    22→  Particle, updateParticles, drawParticles, spawnSparkles,
+    23→} from './sprites';
+    24→import {
+    25→  initAudio, pickVoice, say, sayNumber, setMuted, isMuted,
+    26→  sfxPop, sfxBoing, sfxTap, sfxWhoosh, sfxSparkle, sfxBoom,
+    27→  sfxAlarm, sfxBonk, sfxSneak, sfxFanfare, sfxChime,
+    28→  startRumble, stopRumble, startMusic, stopMusic,
+    29→} from './audio';
+    30→
+    31→export const W = 576;
+    32→export const H = 1024;
+    33→
+    34→type GameState = 'title' | 'intro' | 'play' | 'reveal' | 'retry' | 'win';
+    35→
+    36→interface LevelInfo {
+    37→  n: number;
+    38→  title: string;
+    39→  equation: string;
+    40→  instruction: string;
+    41→}
+    42→
+    43→const LEVELS: LevelInfo[] = [
+    44→  { n: 1, title: 'THE BALANCE', equation: '4 + 4 = ?', instruction: 'Tap the HIGH side of the beam to keep it level!' },
+    45→  { n: 2, title: 'GOLDEN APPLE CLIMB', equation: '1 2 3 4 5 6 7 8', instruction: 'Tap left / right to catch 8 golden apples!' },
+    46→  { n: 3, title: 'GIANT ROAMING ALERT', equation: '8 = 4 + 4', instruction: 'Tap SPLIT when the 8 is on the bridge!' },
+    47→  { n: 4, title: 'SPLIT IN HALF', equation: '4 = 2 + 2', instruction: 'Tap SPLIT at the golden line - only 2s fit!' },
+    48→  { n: 5, title: 'THE EXIT', equation: '2 = 1 + 1', instruction: 'Tap to hop! FREEZE when the eye opens!' },
+    49→  { n: 6, title: 'WE ESCAPED!', equation: '1+1=2  2+2=4  4+4=8', instruction: '' },
+    50→];
+    51→
+    52→interface Apple { x: number; y: number; vy: number; caught: boolean; dead: boolean; t: number }
+    53→
+    54→export class Game {
+    55→  private c: Ctx;
+    56→  private canvas: HTMLCanvasElement;
+    57→  private raf = 0;
+    58→  private lastT = 0;
+    59→  private globalT = 0;
+    60→  state: GameState = 'title';
+    61→  private stateT = 0;
+    62→  private level = 1;
+    63→  private particles: Particle[] = [];
+    64→  private shake = 0;
+    65→  private timeScale = 1;
+    66→  private mutedFlag = false;
+    67→
+    68→  // ---- level 1 ----
+    69→  private l1 = {
+    70→    angle: 0, angVel: 0, count: 0,
+    71→    bounceL: 0, bounceR: 0,
+    72→    windT: 0, merged: false, mergeT: 0,
+    73→    done: false,
+    74→  };
+    75→
+    76→  // ---- level 2 ----
+    77→  private l2 = {
+    78→    y: 760, laneX: 288, targetX: 288,
+    79→    apples: [] as Apple[], caught: 0, spawnT: 0.6,
+    80→    done: false, doneT: 0, climbBob: 0,
+    81→  };
+    82→
+    83→  // ---- level 3 ----
+    84→  private l3 = {
+    85→    b8x: 0, boulderX: -420, alertT: 0,
+    86→    splitT: -1, fours: 0, boulderFall: 0, crashed: false,
+    87→    done: false, bridgeStart: 820, bridgeEnd: 1340,
+    88→    walkT: 0,
+    89→  };
+    90→
+    91→  // ---- level 4 ----
+    92→  private l4 = {
+    93→    x1: 70, x2: 140, splitT: -1, twos: 0,
+    94→    tunnelX: 468, done: false, failed: false, bonkT: -1,
+    95→    warnT: 0,
+    96→  };
+    97→
+    98→  // ---- level 5 ----
+    99→  private l5 = {
+   100→    phase: 'pre' as 'pre' | 'sneak' | 'open',
+   101→    progress: 150, lastSafe: 0,
+   102→    eyeCycle: 0, eyeOpen: 0, // eyeOpen 0..1
+   103→    caughtFlash: 0,
+   104→    hopT: -1, done: false, doorT: 0, warnSound: false,
+   105→  };
+   106→
+   107→  // ---- level 6 ----
+   108→  private l6 = { stage: 0, t: 0, confettiT: 0 };
+   109→
+   110→  constructor(canvas: HTMLCanvasElement) {
+   111→    this.canvas = canvas;
+   112→    const c = canvas.getContext('2d');
+   113→    if (!c) throw new Error('no 2d context');
+   114→    this.c = c;
+   115→    this.resize();
+   116→    this.loop = this.loop.bind(this);
+   117→    this.raf = requestAnimationFrame(this.loop);
+   118→    // debug/testing handle (also lets power users inspect state)
+   119→    (window as unknown as { __ntGame?: Game }).__ntGame = this;
+   120→  }
+   121→
+   122→  destroy(): void {
+   123→    cancelAnimationFrame(this.raf);
+   124→    stopRumble();
+   125→    stopMusic();
+   126→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   127→  }
+   128→
+   129→  resize(): void {
+   130→    const dpr = Math.min(2, window.devicePixelRatio || 1);
+   131→    const rect = this.canvas.getBoundingClientRect();
+   132→    this.canvas.width = Math.round(rect.width * dpr);
+   133→    this.canvas.height = Math.round(rect.height * dpr);
+   134→  }
+   135→
+   136→  // ---------- input ----------
+   137→  onTap(x: number, y: number): void {
+   138→    initAudio();
+   139→    pickVoice();
+   140→    // mute button hit test (top-right circle)
+   141→    const mx = 522, my = 46, mr = 30;
+   142→    if ((x - mx) ** 2 + (y - my) ** 2 <= mr * mr) {
+   143→      this.mutedFlag = !isMuted();
+   144→      setMuted(this.mutedFlag);
+   145→      if (!this.mutedFlag) sfxTap();
+   146→      return;
+   147→    }
+   148→    switch (this.state) {
+   149→      case 'title':
+   150→        startMusic();
+   151→        this.enterIntro(1);
+   152→        break;
+   153→      case 'intro':
+   154→        this.startLevel(this.level);
+   155→        break;
+   156→      case 'reveal':
+   157→        break; // auto-advances
+   158→      case 'retry':
+   159→        break; // auto-advances
+   160→      case 'win':
+   161→        this.backToTitle();
+   162→        break;
+   163→      case 'play':
+   164→        this.tapPlay(x, y);
+   165→        break;
+   166→    }
+   167→  }
+   168→
+   169→  private tapPlay(x: number, y: number): void {
+   170→    if (this.level === 1) this.tapL1(x);
+   171→    else if (this.level === 2) this.tapL2(x);
+   172→    else if (this.level === 3) this.tapL3();
+   173→    else if (this.level === 4) this.tapL4();
+   174→    else if (this.level === 5) this.tapL5();
+   175→    else if (this.level === 6) this.tapL6();
+   176→  }
+   177→
+   178→  // ---------- state transitions ----------
+   179→  private enterIntro(n: number): void {
+   180→    stopRumble();
+   181→    this.level = n;
+   182→    this.state = 'intro';
+   183→    this.stateT = 0;
+   184→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   185→    say(`Level ${n}`, { rate: 1.1, pitch: 1.2 });
+   186→  }
+   187→
+   188→  private startLevel(n: number): void {
+   189→    this.state = 'play';
+   190→    this.stateT = 0;
+   191→    this.particles = [];
+   192→    this.shake = 0;
+   193→    this.timeScale = 1;
+   194→    if (n === 1) {
+   195→      this.l1 = { angle: 0.15, angVel: 0, count: 0, bounceL: 0, bounceR: 0, windT: 0, merged: false, mergeT: 0, done: false };
+   196→      say('Two fours on the balance! Tap the high side!', { rate: 1.05 });
+   197→    } else if (n === 2) {
+   198→      this.l2 = { y: 760, laneX: 288, targetX: 288, apples: [], caught: 0, spawnT: 0.5, done: false, doneT: 0, climbBob: 0 };
+   199→      say('Climb! Catch the golden apples!', { rate: 1.05 });
+   200→    } else if (n === 3) {
+   201→      this.l3 = { b8x: 0, boulderX: -160, alertT: 0, splitT: -1, fours: 0, boulderFall: 0, crashed: false, done: false, bridgeStart: 820, bridgeEnd: 1340, walkT: 0 };
+   202→      say('Time for a quick exit!', { rate: 1.05 });
+   203→    } else if (n === 4) {
+   204→      this.l4 = { x1: 70, x2: 150, splitT: -1, twos: 0, tunnelX: 468, done: false, failed: false, bonkT: -1, warnT: 0 };
+   205→      say(`We're not going to make it! What now?`, { rate: 1.0 });
+   206→    } else if (n === 5) {
+   207→      this.l5 = { phase: 'pre', progress: 150, lastSafe: 0, eyeCycle: 0, eyeOpen: 0, caughtFlash: 0, hopT: -1, done: false, doorT: 0, warnSound: false };
+   208→      say('The exit! Sneak past the giant eye!', { rate: 1.0 });
+   209→    } else if (n === 6) {
+   210→      this.l6 = { stage: 0, t: 0, confettiT: 0 };
+   211→      stopMusic();
+   212→      sfxFanfare();
+   213→    }
+   214→  }
+   215→
+   216→  private enterReveal(parts: string[], next: () => void): void {
+   217→    // stored transition is executed on reveal end
+   218→    this.pendingNext = next;
+   219→    this.revealParts = parts;
+   220→    this.state = 'reveal';
+   221→    this.stateT = 0;
+   222→    sfxSparkle();
+   223→    spawnSparkles(this.particles, W / 2, H / 2 - 120, 40, PAL.goldLight);
+   224→  }
+   225→  private pendingNext: (() => void) | null = null;
+   226→  private revealParts: string[] = [];
+   227→
+   228→  private enterRetry(msg = 'OOPS! TRY AGAIN!'): void {
+   229→    stopRumble();
+   230→    this.state = 'retry';
+   231→    this.stateT = 0;
+   232→    this.retryMsg = msg;
+   233→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   234→    say('Whoa!', { rate: 1.15, pitch: 0.9 });
+   235→  }
+   236→  private retryMsg = 'OOPS! TRY AGAIN!';
+   237→
+   238→  private backToTitle(): void {
+   239→    this.state = 'title';
+   240→    this.stateT = 0;
+   241→    this.level = 1;
+   242→    startMusic();
+   243→    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
+   244→  }
+   245→
+   246→  // ============================================================
+   247→  // LEVEL 1 - THE BALANCE
+   248→  // ============================================================
+   249→  private tapL1(x: number): void {
+   250→    const l = this.l1;
+   251→    if (l.merged || l.done) return;
+   252→    const side = x < W / 2 ? -1 : 1; // -1 left, 1 right
+   253→    // NOTE: positive angle = clockwise = RIGHT side down, LEFT side up
+   254→    const highSide = l.angle > 0.035 ? -1 : l.angle < -0.035 ? 1 : (Math.random() > 0.5 ? -1 : 1);
+   255→    const good = side === highSide || Math.abs(l.angle) <= 0.035;
+   256→    if (good) {
+   257→      l.count++;
+   258→      l.angVel += side * 1.5;
+   259→      if (side < 0) l.bounceL = 1; else l.bounceR = 1;
+   260→      sfxTap(1 + (l.count % 3) * 0.12);
+   261→      sfxBoing(side < 0 ? 1.1 : 0.9);
+   262→      sayNumber(Math.min(8, l.count));
+   263→      spawnSparkles(this.particles, W / 2 + side * 180, 620, 6, PAL.goldLight);
+   264→      if (l.count === 4) say('Keep going! Keep going!', { rate: 1.15 });
+   265→      if (l.count >= 8) {
+   266→        l.merged = true;
+   267→        l.mergeT = 0;
+   268→        say('And double it! Four plus four equals eight!', { rate: 1.05 });
+   269→        sfxSparkle();
+   270→        spawnSparkles(this.particles, W / 2, 560, 50, PAL.goldLight);
+   271→      }
+   272→    } else {
+   273→      l.angVel += side * 1.9;
+   274→      sfxBonk();
+   275→      spawnSparkles(this.particles, W / 2 + side * 180, 620, 8, PAL.redLight);
+   276→    }
+   277→  }
+   278→
+   279→  private updateL1(dt: number): void {
+   280→    const l = this.l1;
+   281→    l.windT += dt;
+   282→    if (l.bounceL > 0) l.bounceL = Math.max(0, l.bounceL - dt * 4);
+   283→    if (l.bounceR > 0) l.bounceR = Math.max(0, l.bounceR - dt * 4);
+   284→    if (!l.merged) {
+   285→      // destabilizing beam physics + gentle wind gusts (tuned to be fair)
+   286→      l.angVel += (l.angle * 1.2 + Math.sin(l.windT * 1.7) * 0.35) * dt * 2.0;
+   287→      l.angVel *= 0.955;
+   288→      l.angle += l.angVel * dt * 0.5;
+   289→      if (Math.abs(l.angle) > 0.72) {
+   290→        this.enterRetry('THE BLOCKS SLID OFF!');
+   291→        return;
+   292→      }
+   293→    } else {
+   294→      l.mergeT += dt;
+   295→      if (l.mergeT > 2.4 && !l.done) {
+   296→        l.done = true;
+   297→        this.enterReveal(['4', '+', '4', '=', '8'], () => {
+   298→          this.enterIntro(2);
+   299→        });
+   300→      }
+   301→    }
+   302→  }
+   303→
+   304→  private drawL1(): void {
+   305→    const c = this.c;
+   306→    const l = this.l1;
+   307→    drawCaveBackground(c, this.globalT);
+   308→    drawSpotlight(c, W / 2, 0, 260, 780, 0.22);
+   309→    drawGoldenDoor(c, 288, 640, 96, 150, 0.4 + 0.6 * Math.abs(Math.sin(this.globalT * 0.7)));
+   310→    drawBallPit(c, 770, 254, this.globalT);
+   311→    // seesaw
+   312→    const angle = l.merged ? 0 : l.angle;
+   313→    drawSeesaw(c, 288, 640, 216, angle);
+   314→    // the two green 4s riding the beam (seated along the beam line)
+   315→    const beamY = 640;
+   316→    const sa = Math.sin(angle);
+   317→    const ca = Math.cos(angle);
+   318→    if (!l.merged) {
+   319→      const squashL = l.bounceL * 0.5;
+   320→      const squashR = l.bounceR * 0.5;
+   321→      drawGreen4(c, {
+   322→        cx: 288 - 200 * ca, bottomY: beamY - 200 * sa - 9,
+   323→        scale: 0.78, look: 0, mouth: Math.abs(l.angle) > 0.4 ? 'worried' : 'smile',
+   324→        squash: squashL, tilt: angle, time: this.globalT,
+   325→      });
+   326→      drawGreen4(c, {
+   327→        cx: 288 + 200 * ca, bottomY: beamY + 200 * sa - 9,
+   328→        scale: 0.78, look: 0, mouth: Math.abs(l.angle) > 0.4 ? 'worried' : 'smile',
+   329→        squash: squashR, tilt: angle, time: this.globalT,
+   330→      });
+   331→    } else {
+   332→      // merge animation: both slide to center, pink 8 rises
+   333→      const mt = Math.min(1, l.mergeT / 1.0);
+   334→      const gx = 288 - 200 * (1 - mt);
+   335→      const gy = beamY - 200 * sa * (1 - mt);
+   336→      if (mt < 1) {
+   337→        drawGreen4(c, { cx: gx, bottomY: gy, scale: 0.78, look: 0, squash: 0.3, armsUp: true, time: this.globalT, alpha: 1 - mt * 0.7 });
+   338→        drawGreen4(c, { cx: 288 + 200 * (1 - mt), bottomY: gy, scale: 0.78, look: 0, squash: 0.3, armsUp: true, time: this.globalT, alpha: 1 - mt * 0.7 });
+   339→      }
+   340→      if (l.mergeT > 0.9) {
+   341→        const rise = Math.min(1, (l.mergeT - 0.9) / 0.7);
+   342→        const bob = Math.sin(this.globalT * 3) * 6;
+   343→        const bottom = beamY + 20 - rise * 160 + bob * rise;
+   344→        drawPink8(c, {
+   345→          cx: 288, bottomY: bottom, scale: 0.85 + rise * 0.15,
+   346→          look: 0, armsUp: true, apples: 0, mouth: 'smile', time: this.globalT,
+   347→        });
+   348→        drawBadge(c, 288, bottom - 300, 8, 1.1);
+   349→      }
+   350→    }
+   351→    // equation chips
+   352→    const chips: Array<'4' | '+' | '=' | '8' | '?'> = ['4', '+', '4', '=', l.count >= 8 ? '8' : '?'];
+   353→    drawChipEquation(c, 92, 96, chips);
+   354→    // balance meter
+   355→    drawProgressBar(c, 92, 170, 240, 22, l.count / 8);
+   356→    this.drawHint('TAP THE HIGH SIDE!');
+   357→    this.drawMuteBtn();
+   358→    this.drawParticlesAndShake();
+   359→  }
+   360→
+   361→  // ============================================================
+   362→  // LEVEL 2 - APPLE CLIMB
+   363→  // ============================================================
+   364→  private tapL2(x: number): void {
+   365→    const l = this.l2;
+   366→    if (l.done) return;
+   367→    l.targetX = x < 192 ? 168 : x < 384 ? 288 : 408;
+   368→    sfxTap(1.3);
+   369→  }
+   370→
+   371→  private updateL2(dt: number): void {
+   372→    const l = this.l2;
+   373→    l.laneX += (l.targetX - l.laneX) * Math.min(1, dt * 6);
+   374→    if (!l.done) {
+   375→      l.y -= 42 * dt; // auto climb
+   376→      if (l.y < 300) l.y = 300;
+   377→      l.climbBob += dt;
+   378→      // spawn apples
+   379→      l.spawnT -= dt;
+   380→      if (l.spawnT <= 0 && l.caught + l.apples.filter((a) => !a.caught && !a.dead).length < 9) {
+   381→        const lanes = [168, 288, 408];
+   382→        l.apples.push({
+   383→          x: lanes[Math.floor(Math.random() * 3)] + (Math.random() * 30 - 15),
+   384→          y: -40, vy: 150 + Math.random() * 70, caught: false, dead: false, t: 0,
+   385→        });
+   386→        l.spawnT = Math.max(0.45, 1.1 - this.globalT * 0.01) + Math.random() * 0.5;
+   387→      }
+   388→      // move & catch
+   389→      for (const a of l.apples) {
+   390→        a.t += dt;
+   391→        if (a.dead) continue;
+   392→        if (a.caught) {
+   393→          a.x += (l.laneX - a.x) * dt * 8;
+   394→          a.y += (l.y - 150 - a.y) * dt * 8;
+   395→          if (a.y < l.y - 145) a.dead = true;
+   396→        } else {
+   397→          a.y += a.vy * dt;
+   398→          const dx = a.x - l.laneX;
+   399→          const dy = a.y - (l.y - 110);
+   400→          if (dx * dx + dy * dy < 80 * 80) {
+   401→            a.caught = true;
+   402→            l.caught++;
+   403→            sfxPop(1 + l.caught * 0.07);
+   404→            sayNumber(l.caught);
+   405→            spawnSparkles(this.particles, a.x, a.y, 12, PAL.goldLight);
+   406→            if (l.caught === 8) {
+   407→              l.done = true;
+   408→              l.doneT = 0;
+   409→              say('The golden delicious!', { rate: 1.0, pitch: 1.2 });
+   410→              sfxFanfare();
+   411→              spawnSparkles(this.particles, l.laneX, l.y - 110, 60, PAL.goldLight);
+   412→            }
+   413→          } else if (a.y > 900) {
+   414→            a.dead = true;
+   415→          }
+   416→        }
+   417→      }
+   418→      l.apples = l.apples.filter((a) => !a.dead);
+   419→    } else {
+   420→      l.doneT += dt;
+   421→      if (l.doneT > 2.3) {
+   422→        this.enterReveal(['8', 'GOLDEN', 'APPLES'], () => this.enterIntro(3));
+   423→      }
+   424→    }
+   425→  }
+   426→
+   427→  private drawL2(): void {
+   428→    const c = this.c;
+   429→    const l = this.l2;
+   430→    drawCaveBackground(c, this.globalT, 'dark');
+   431→    drawSpotlight(c, 288, 0, 230, 1024, 0.16);
+   432→    // climbing pole
+   433→    const pg = c.createLinearGradient(283, 0, 293, 0);
+   434→    pg.addColorStop(0, PAL.goldDark);
+   435→    pg.addColorStop(0.5, PAL.goldLight);
+   436→    pg.addColorStop(1, PAL.goldDark);
+   437→    c.fillStyle = pg;
+   438→    c.fillRect(283, 120, 10, 720);
+   439→    // platform at bottom
+   440→    drawPlanks(c, 128, 800, 320, 26);
+   441→    // falling apples
+   442→    for (const a of l.apples) {
+   443→      if (!a.caught && !a.dead) drawApple(c, a.x, a.y, 22, true, a.t * 3);
+   444→    }
+   445→    // pink 8 climbing
+   446→    const bob = Math.sin(l.climbBob * 6) * 8;
+   447→    const mouth: 'smile' | 'grit' = l.done ? 'smile' : 'grit';
+   448→    drawPink8(c, {
+   449→      cx: l.laneX, bottomY: l.y + bob, scale: 0.72,
+   450→      look: (l.targetX - l.laneX) * 0.01, mouth,
+   451→      apples: l.done ? 8 : 0, time: this.globalT,
+   452→    });
+   453→    // badge
+   454→    drawBadge(c, l.laneX, l.y + bob - 300, 8, 1);
+   455→    // caught apples flying to arms
+   456→    for (const a of l.apples) {
+   457→      if (a.caught && !a.dead) drawApple(c, a.x, a.y, 18, true, a.t * 4);
+   458→    }
+   459→    drawAppleCounter(c, 100, 40, l.caught, 8);
+   460→    if (l.done) drawBanner(c, 'THE GOLDEN DELICIOUS!', 940, this.stateT, PAL.goldLight, 36);
+   461→    else this.drawHint('TAP LEFT / RIGHT TO CATCH!');
+   462→    this.drawMuteBtn();
+   463→    this.drawParticlesAndShake();
+   464→  }
+   465→
+   466→  // ============================================================
+   467→  // LEVEL 3 - GIANT ROAMING ALERT
+   468→  // ============================================================
+   469→  private tapL3(): void {
+   470→    const l = this.l3;
+   471→    if (l.done || l.splitT >= 0) return;
+   472→    const onBridge = l.b8x >= l.bridgeStart + 30 && l.b8x <= l.bridgeEnd - 60;
+   473→    if (onBridge) {
+   474→      l.splitT = 0;
+   475→      stopRumble();
+   476→      sfxSparkle();
+   477→      sfxWhoosh();
+   478→      say('Eight equals four plus four!', { rate: 1.05 });
+   479→    } else {
+   480→      sfxBonk();
+   481→      this.showTooEarlyFlash = 0.8;
+   482→    }
+   483→  }
+   484→  private showTooEarlyFlash = 0;
+   485→
+   486→  private updateL3(dt: number): void {
+   487→    const l = this.l3;
+   488→    this.showTooEarlyFlash = Math.max(0, this.showTooEarlyFlash - dt);
+   489→    if (l.done) {
+   490→      l.walkT += dt;
+   491→      if (l.walkT > 2.6) {
+   492→        this.enterReveal(['8', '=', '4', '+', '4'], () => this.enterIntro(4));
+   493→      }
+   494→      return;
+   495→    }
+   496→    if (l.splitT >= 0) {
+   497→      // split sequence
+   498→      l.splitT += dt;
+   499→      if (l.splitT > 0.55 && l.fours === 0) {
+   500→        l.fours = 1;
+   501→        spawnSparkles(this.particles, 288, 520, 46, PAL.goldLight);
+   502→        spawnSparkles(this.particles, 288, 520, 20, PAL.greenLight);
+   503→      }
+   504→      // boulder keeps rolling & falls into chasm
+   505→      l.boulderX += 300 * dt;
+   506→      if (!l.crashed && l.boulderX > (l.bridgeStart + l.bridgeEnd) / 2 - 40) {
+   507→        l.crashed = true;
+   508→        l.boulderFall = 0.001;
+   509→        sfxBoom();
+   510→        this.shake = 0.7;
+   511→        spawnSparkles(this.particles, 288, 700, 30, '#8a6a45');
+   512→        say('Phew!', { rate: 1.2, pitch: 1.3 });
+   513→      }
+   514→      if (l.boulderFall > 0) l.boulderFall += dt;
+   515→      if (l.splitT > 1.9 && !l.done) {
+   516→        l.done = true;
+   517→        l.walkT = 0;
+   518→      }
+   519→      return;
+   520→    }
+   521→    // walking phase
+   522→    l.b8x += 128 * dt;
+   523→    l.walkT += dt;
+   524→    const boulderGap = l.b8x - l.boulderX;
+   525→    if (l.walkT > 0.8 && l.alertT === 0) {
+   526→      l.alertT = 0.001;
+   527→      sfxAlarm();
+   528→      say('Giant roaming alert!', { rate: 1.0, pitch: 1.0 });
+   529→      startRumble();
+   530→    }
+   531→    if (l.alertT > 0) {
+   532→      l.alertT += dt;
+   533→      if (l.alertT > 1.2) {
+   534→        l.boulderX += 175 * dt;
+   535→        if (l.boulderX + 66 >= l.b8x - 60) {
+   536→          // caught!
+   537→          stopRumble();
+   538→          sfxBoom();
+   539→          this.shake = 0.9;
+   540→          spawnSparkles(this.particles, 288, 560, 30, PAL.redLight);
+   541→          this.enterRetry('THE GIANT GOT YOU!');
+   542→          return;
+   543→        }
+   544→      }
+   545→    }
+   546→    if (l.b8x > l.bridgeEnd - 30) {
+   547→      // walked off without splitting - bridge ends, fall
+   548→      this.enterRetry('TOO LATE! YOU NEEDED TO SPLIT!');
+   549→    }
+   550→  }
+   551→
+   552→  private drawL3(): void {
+   553→    const c = this.c;
+   554→    const l = this.l3;
+   555→    const cam = Math.max(0, l.b8x - 160);
+   556→    c.save();
+   557→    if (this.shake > 0) {
+   558→      c.translate((Math.random() - 0.5) * this.shake * 26, (Math.random() - 0.5) * this.shake * 26);
+   559→    }
+   560→    drawCaveBackground(c, this.globalT, 'dark');
+   561→    drawSpotlight(c, 288, 0, 300, 1024, 0.14);
+   562→    // ground with chasm
+   563→    const groundY = 660;
+   564→    const sx = (wx: number): number => wx - cam;
+   565→    c.save();
+   566→    // left ground
+   567→    const leftEnd = sx(l.bridgeStart);
+   568→    if (leftEnd > -50) {
+   569→      drawPlanks(c, -50, groundY, leftEnd + 50, 40);
+   570→    }
+   571→    // bridge
+   572→    const b0 = sx(l.bridgeStart);
+   573→    const b1 = sx(l.bridgeEnd);
+   574→    drawBridge(c, b0, groundY, Math.max(0, b1 - b0), 26);
+   575→    // right ground
+   576→    if (b1 < W + 50) {
+   577→      drawPlanks(c, b1, groundY, W + 50 - b1, 40);
+   578→    }
+   579→    // chasm shadow
+   580→    c.fillStyle = 'rgba(0,0,0,0.65)';
+   581→    c.fillRect(b0, groundY + 40, Math.max(0, b1 - b0), 300);
+   582→    c.restore();
+   583→    // boulder
+   584→    if (l.alertT > 1.2 || l.splitT >= 0) {
+   585→      const bx = sx(l.boulderX);
+   586→      const by = l.boulderFall > 0 ? groundY + l.boulderFall * l.boulderFall * 900 : groundY - 64;
+   587→      if (bx > -140) drawBoulder(c, bx, by, 66, this.globalT * 3);
+   588→    }
+   589→    // characters
+   590→    if (l.splitT < 0) {
+   591→      // pink 8 walking
+   592→      const bob = Math.sin(l.walkT * 7) * 5;
+   593→      drawPink8(c, {
+   594→        cx: sx(l.b8x), bottomY: groundY - 26 + bob, scale: 0.7,
+   595→        look: 0.6, mouth: 'grit', time: this.globalT,
+   596→      });
+   597→      drawBadge(c, sx(l.b8x), groundY - 26 + bob - 280, 8, 1);
+   598→    } else if (l.fours > 0) {
+   599→      // two green 4s leapt apart (with apples!)
+   600→      const st = Math.min(1, (l.splitT - 0.55) / 0.7);
+   601→      const ease = 1 - (1 - st) * (1 - st);
+   602→      drawGreen4(c, {
+   603→        cx: 288 - 150 - 90 * ease, bottomY: groundY - 26, scale: 0.72,
+   604→        look: 0.6, mouth: 'smile', apples: 4, time: this.globalT,
+   605→      });
+   606→      drawGreen4(c, {
+   607→        cx: 288 + 150 + 90 * ease, bottomY: groundY - 26, scale: 0.72,
+   608→        look: 0.6, mouth: 'smile', apples: 4, time: this.globalT,
+   609→      });
+   610→      if (st < 1) {
+   611→        drawBadge(c, 288 - 150 - 90 * ease, groundY - 200, 4, 0.9);
+   612→        drawBadge(c, 288 + 150 + 90 * ease, groundY - 200, 4, 0.9);
+   613→      }
+   614→    }
+   615→    c.restore();
+   616→    // HUD
+   617→    if (l.alertT > 0 && l.splitT < 0) {
+   618→      const blink = Math.sin(this.stateT * 10) > -0.3;
+   619→      if (blink) drawBanner(c, 'GIANT ROAMING ALERT!', 200, this.stateT, PAL.red, 38);
+   620→    }
+   621→    drawProgressBar(c, 100, 52, 300, 20, Math.min(1, l.b8x / (l.bridgeEnd - 40)));
+   622→    if (l.splitT < 0 && !l.done) {
+   623→      drawSplitButton(c, 288, 900, 74, this.globalT);
+   624→      this.drawHint('');
+   625→    }
+   626→    if (this.showTooEarlyFlash > 0) {
+   627→      drawBanner(c, 'WAIT FOR THE BRIDGE!', 200, this.stateT, PAL.orangeLight, 32);
+   628→    }
+   629→    if (l.done) drawBanner(c, 'PHEW! SAFE!', 200, this.stateT, PAL.greenLight, 40);
+   630→    this.drawMuteBtn();
+   631→    this.drawParticlesAndShake();
+   632→  }
+   633→
+   634→  // ============================================================
+   635→  // LEVEL 4 - SPLIT IN HALF
+   636→  // ============================================================
+   637→  private tapL4(): void {
+   638→    const l = this.l4;
+   639→    if (l.done || l.failed || l.splitT >= 0) return;
+   640→    const zone = Math.min(l.x1, l.x2);
+   641→    if (zone > 210 && zone < l.tunnelX - 40) {
+   642→      l.splitT = 0;
+   643→      sfxSparkle();
+   644→      sfxWhoosh();
+   645→      say('Four equals two plus two!', { rate: 1.05 });
+   646→    } else {
+   647→      sfxBonk();
+   648→      this.showTooEarlyFlash = 0.8;
+   649→    }
+   650→  }
+   651→
+   652→  private updateL4(dt: number): void {
+   653→    const l = this.l4;
+   654→    this.showTooEarlyFlash = Math.max(0, this.showTooEarlyFlash - dt);
+   655→    l.warnT += dt;
+   656→    if (l.warnT > 1.6 && l.warnT - dt <= 1.6) {
+   657→      say('Split in half!', { rate: 1.0 });
+   658→    }
+   659→    if (l.failed) return;
+   660→    if (l.splitT >= 0) {
+   661→      l.splitT += dt;
+   662→      if (l.splitT > 0.55 && l.twos === 0) {
+   663→        l.twos = 1;
+   664→        spawnSparkles(this.particles, 288, 560, 46, PAL.goldLight);
+   665→        spawnSparkles(this.particles, 288, 560, 20, PAL.orangeLight);
+   666→      }
+   667→      if (l.splitT > 2.4 && !l.done) {
+   668→        l.done = true;
+   669→        this.enterReveal(['4', '=', '2', '+', '2'], () => this.enterIntro(5));
+   670→      }
+   671→      return;
+   672→    }
+   673→    // run right
+   674→    const speed = 150;
+   675→    l.x1 += speed * dt;
+   676→    l.x2 += speed * dt;
+   677→    const lead = Math.min(l.x1, l.x2);
+   678→    if (lead > l.tunnelX - 58) {
+   679→      // hit the tunnel wall
+   680→      l.failed = true;
+   681→      l.bonkT = 0;
+   682→      sfxBonk();
+   683→      this.shake = 0.6;
+   684→      this.enterRetry("THE TUNNEL'S TOO SMALL!");
+   685→    }
+   686→  }
+   687→
+   688→  private drawL4(): void {
+   689→    const c = this.c;
+   690→    const l = this.l4;
+   691→    drawCaveBackground(c, this.globalT);
+   692→    drawSpotlight(c, 288, 0, 300, 1024, 0.15);
+   693→    const groundY = 700;
+   694→    drawPlanks(c, -20, groundY, W + 40, 44);
+   695→    // tunnel arch (only 2s fit)
+   696→    drawTunnelArch(c, l.tunnelX, W - l.tunnelX + 60, groundY, 100);
+   697→    // golden split zone marker
+   698→    if (l.splitT < 0 && !l.failed) {
+   699→      c.save();
+   700→      c.strokeStyle = 'rgba(255,215,90,0.9)';
+   701→      c.setLineDash([14, 10]);
+   702→      c.lineWidth = 5;
+   703→      c.beginPath();
+   704→      c.moveTo(210, groundY);
+   705→      c.lineTo(210, groundY - 340);
+   706→      c.stroke();
+   707→      c.setLineDash([]);
+   708→      c.fillStyle = 'rgba(255,215,90,0.9)';
+   709→      c.font = '800 24px "Nunito", Arial, sans-serif';
+   710→      c.textAlign = 'center';
+   711→      c.fillText('SPLIT HERE', 210, groundY - 360);
+   712→      c.restore();
+   713→    }
+   714→    const bob = Math.sin(this.globalT * 9) * 4;
+   715→    if (l.splitT < 0) {
+   716→      // two green 4s running
+   717→      drawGreen4(c, {
+   718→        cx: l.x1, bottomY: groundY - 10 + bob * 0.5, scale: 0.85,
+   719→        look: 0.7, mouth: 'worried', apples: 4, time: this.globalT,
+   720→      });
+   721→      drawGreen4(c, {
+   722→        cx: l.x2, bottomY: groundY - 10 - bob * 0.5, scale: 0.85,
+   723→        look: 0.7, mouth: 'worried', apples: 4, time: this.globalT,
+   724→      });
+   725→      drawBadge(c, l.x1, groundY - 190, 4, 0.8);
+   726→      drawBadge(c, l.x2, groundY - 190, 4, 0.8);
+   727→    } else if (l.twos > 0) {
+   728→      // four orange 2s running through
+   729→      const run = Math.max(0, l.splitT - 0.55) * 260;
+   730→      for (let i = 0; i < 4; i++) {
+   731→        const bx = 100 + i * 88 + run;
+   732→        if (bx < W + 60) {
+   733→          drawOrange2(c, {
+   734→            cx: bx, bottomY: groundY - 8 + Math.sin(this.globalT * 10 + i) * 4, scale: 0.55,
+   735→            look: 0.8, mouth: 'smile', apples: 2, time: this.globalT,
+   736→          });
+   737→        }
+   738→      }
+   739→    }
+   740→    if (this.showTooEarlyFlash > 0) {
+   741→      drawBanner(c, 'WAIT FOR THE GOLD LINE!', 240, this.stateT, PAL.orangeLight, 30);
+   742→    }
+   743→    if (l.warnT > 0.2 && l.warnT < 2.2 && l.splitT < 0) {
+   744→      drawBanner(c, "WE'RE NOT GOING TO MAKE IT!", 200, this.stateT, PAL.red, 30);
+   745→    }
+   746→    drawProgressBar(c, 100, 52, 300, 20, Math.min(1, l.x2 / (l.tunnelX - 60)));
+   747→    if (l.splitT < 0 && !l.failed) drawSplitButton(c, 288, 900, 74, this.globalT);
+   748→    this.drawMuteBtn();
+   749→    this.drawParticlesAndShake();
+   750→  }
+   751→
+   752→  // ============================================================
+   753→  // LEVEL 5 - THE EXIT (sneak past the giant eye)
+   754→  // ============================================================
+   755→  private tapL5(): void {
+   756→    const l = this.l5;
+   757→    if (l.done) return;
+   758→    if (l.phase === 'pre') {
+   759→      l.phase = 'sneak';
+   760→      sfxSparkle();
+   761→      sfxWhoosh();
+   762→      say('Two equals one plus one!', { rate: 1.0 });
+   763→      return;
+   764→    }
+   765→    if (l.phase !== 'sneak') return;
+   766→    if (l.hopT >= 0) return; // mid-hop
+   767→    if (l.eyeOpen > 0.45) {
+   768→      // caught moving!
+   769→      l.caughtFlash = 0.9;
+   770→      sfxBonk();
+   771→      say('Whoa!', { rate: 1.2, pitch: 0.85 });
+   772→      l.progress = Math.max(0, l.progress - 110);
+   773→      l.lastSafe = l.progress;
+   774→      return;
+   775→    }
+   776→    // hop forward
+   777→    l.hopT = 0;
+   778→    l.progress += 38;
+   779→    sfxSneak();
+   780→  }
+   781→
+   782→  private updateL5(dt: number): void {
+   783→    const l = this.l5;
+   784→    l.caughtFlash = Math.max(0, l.caughtFlash - dt);
+   785→    if (l.hopT >= 0) {
+   786→      l.hopT += dt;
+   787→      if (l.hopT > 0.3) l.hopT = -1;
+   788→    }
+   789→    if (l.phase === 'pre') {
+   790→      l.eyeCycle += dt;
+   791→      return;
+   792→    }
+   793→    if (l.done) {
+   794→      l.doorT += dt;
+   795→      if (l.doorT > 2.2) {
+   796→        this.enterReveal(['2', '=', '1', '+', '1'], () => this.enterIntro(6));
+   797→      }
+   798→      return;
+   799→    }
+   800→    // eye cycle: closed 1.9s -> warn 0.45s -> open 1.35s
+   801→    l.eyeCycle += dt;
+   802→    const closed = 1.9, warn = 0.45, open = 1.35;
+   803→    const t = l.eyeCycle % (closed + warn + open);
+   804→    let target = 0;
+   805→    if (t > closed + warn) target = 1;
+   806→    else if (t > closed) target = 0.18;
+   807→    l.eyeOpen += (target - l.eyeOpen) * Math.min(1, dt * 7);
+   808→    if (t > closed && !l.warnSound) {
+   809→      l.warnSound = true;
+   810→      sfxChime(0.6);
+   811→    }
+   812→    if (t < closed) l.warnSound = false;
+   813→    // reach door?
+   814→    if (l.progress >= 340) {
+   815→      l.done = true;
+   816→      l.doorT = 0;
+   817→      sfxFanfare();
+   818→      say('The coast is clear!', { rate: 1.05 });
+   819→      spawnSparkles(this.particles, 430, 700, 40, PAL.goldLight);
+   820→    }
+   821→  }
+   822→
+   823→  private drawL5(): void {
+   824→    const c = this.c;
+   825→    const l = this.l5;
+   826→    drawCaveBackground(c, this.globalT, 'dark');
+   827→    drawSpotlight(c, 430, 0, 220, 800, 0.18);
+   828→    const groundY = 760;
+   829→    drawPlanks(c, -20, groundY, W + 40, 44);
+   830→    // exit door at right
+   831→    drawExitDoor(c, 430, groundY, l.done ? Math.min(1, l.doorT / 1.4) : 0, this.globalT);
+   832→    // guard eye above door
+   833→    drawGuardEye(c, 430, 300, l.eyeOpen, this.globalT);
+   834→    // characters
+   835→    const baseX = 90 + l.progress;
+   836→    if (l.phase === 'pre') {
+   837→      // four orange 2s waiting
+   838→      for (let i = 0; i < 4; i++) {
+   839→        drawOrange2(c, {
+   840→          cx: 80 + i * 66, bottomY: groundY - 8 + Math.sin(this.globalT * 4 + i) * 3, scale: 0.52,
+   841→          look: 0.8, mouth: 'worried', apples: 2, time: this.globalT,
+   842→        });
+   843→      }
+   844→      drawBadge(c, 212, groundY - 160, 2, 0.8);
+   845→    } else {
+   846→      // eight red 1s sneaking in a line (leader first)
+   847→      for (let i = 0; i < 8; i++) {
+   848→        const delay = i * 0.02;
+   849→        const h = l.hopT >= 0 ? Math.max(0, Math.sin(((l.hopT - delay) / 0.3) * Math.PI)) * 26 : 0;
+   850→        drawRed1(c, {
+   851→          cx: baseX - i * 34, bottomY: groundY - 8 - h, scale: 0.44 + (i % 2) * 0.02,
+   852→          look: 0.9, mouth: l.caughtFlash > 0 ? 'oh' : 'grit', apples: 1, time: this.globalT,
+   853→        });
+   854→      }
+   855→      drawBadge(c, baseX, groundY - 105, 1, 0.7);
+   856→    }
+   857→    // danger flash
+   858→    if (l.caughtFlash > 0) {
+   859→      c.save();
+   860→      c.globalAlpha = l.caughtFlash * 0.35;
+   861→      c.fillStyle = PAL.red;
+   862→      c.fillRect(0, 0, W, H);
+   863→      c.restore();
+   864→      drawBanner(c, 'THE EYE SAW YOU!', 200, this.stateT, PAL.red, 36);
+   865→    }
+   866→    drawProgressBar(c, 100, 52, 300, 20, Math.min(1, l.progress / 340));
+   867→    if (l.phase === 'pre') {
+   868→      drawSplitButton(c, 288, 900, 74, this.globalT);
+   869→    } else if (!l.done) {
+   870→      drawSplitButton(c, 288, 900, 74, this.globalT, 'HOP!');
+   871→      if (l.eyeOpen > 0.45) {
+   872→        drawBanner(c, 'FREEZE!', 200, this.stateT, PAL.goldLight, 40);
+   873→      }
+   874→    }
+   875→    if (l.done) drawBanner(c, 'THE COAST IS CLEAR!', 200, this.stateT, PAL.greenLight, 36);
+   876→    this.drawHint(l.phase === 'pre' ? '' : 'HOP IN THE DARK - FREEZE IN THE LIGHT!');
+   877→    this.drawMuteBtn();
+   878→    this.drawParticlesAndShake();
+   879→  }
+   880→
+   881→  // ============================================================
+   882→  // LEVEL 6 - ESCAPE (merge-up celebration)
+   883→  // ============================================================
+   884→  private tapL6(): void {
+   885→    if (this.l6.stage >= 4) {
+   886→      this.enterIntro(1);
+   887→    }
+   888→  }
+   889→
+   890→  private updateL6(dt: number): void {
+   891→    const l = this.l6;
+   892→    l.t += dt;
+   893→    l.confettiT -= dt;
+   894→    if (l.confettiT <= 0 && l.stage >= 3) {
+   895→      l.confettiT = 0.5;
+   896→      spawnSparkles(this.particles, Math.random() * W, -10, 14, [PAL.gold, PAL.pink, PAL.green, PAL.orange, PAL.water][Math.floor(Math.random() * 5)]);
+   897→    }
+   898→    // staged merges: ones -> twos -> fours -> eight
+   899→    const stages = [1.2, 2.6, 4.0, 5.6];
+   900→    if (l.stage < 4 && l.t > stages[l.stage]) {
+   901→      l.stage++;
+   902→      sfxSparkle();
+   903→      spawnSparkles(this.particles, 288, 500, 40, PAL.goldLight);
+   904→      if (l.stage === 1) { say('Two equals one plus one!', { rate: 1.1 }); sfxBoom(); }
+   905→      if (l.stage === 2) { say('Four equals two plus two!', { rate: 1.1 }); sfxBoom(); }
+   906→      if (l.stage === 3) { say('And four plus four equals eight!', { rate: 1.1 }); sfxBoom(); }
+   907→      if (l.stage === 4) {
+   908→        say('One, two, three, four, five, six, seven, eight! We escaped!', { rate: 1.0 });
+   909→        sfxFanfare();
+   910→        startMusic();
+   911→      }
+   912→    }
+   913→  }
+   914→
+   915→  private drawL6(): void {
+   916→    const c = this.c;
+   917→    const l = this.l6;
+   918→    const openT = Math.min(1, l.t / 1.1);
+   919→    // tropical scene fills screen
+   920→    c.save();
+   921→    const sky = c.createLinearGradient(0, 0, 0, H);
+   922→    sky.addColorStop(0, PAL.skyTop);
+   923→    sky.addColorStop(0.7, '#e8f8ea');
+   924→    sky.addColorStop(1, PAL.sand);
+   925→    c.fillStyle = sky;
+   926→    c.fillRect(0, 0, W, H);
+   927→    // sea
+   928→    c.fillStyle = PAL.water;
+   929→    c.fillRect(0, 520, W, 130);
+   930→    const shimmer = c.createLinearGradient(0, 520, 0, 650);
+   931→    shimmer.addColorStop(0, 'rgba(255,255,255,0.5)');
+   932→    shimmer.addColorStop(1, 'rgba(255,255,255,0)');
+   933→    c.fillStyle = shimmer;
+   934→    c.fillRect(0, 520, W, 130);
+   935→    // sand foreground
+   936→    c.fillStyle = PAL.sand;
+   937→    c.beginPath();
+   938→    c.ellipse(288, 1020, 420, 220, 0, Math.PI, 0);
+   939→    c.fill();
+   940→    // palms
+   941→    for (const [px, s] of [[60, 1.1], [510, 1.2], [120, 0.8]] as Array<[number, number]>) {
+   942→      c.strokeStyle = PAL.palmTrunk;
+   943→      c.lineWidth = 14 * s;
+   944→      c.lineCap = 'round';
+   945→      c.beginPath();
+   946→      c.moveTo(px, 660);
+   947→      c.quadraticCurveTo(px + 16 * s, 660 - 130 * s, px + 6 * s, 660 - 210 * s);
+   948→      c.stroke();
+   949→      const top = { x: px + 6 * s, y: 660 - 210 * s };
+   950→      const sway = Math.sin(this.globalT * 1.4 + px) * 6;
+   951→      for (let i = 0; i < 6; i++) {
+   952→        const a = (-1.1 + i * 0.44) + sway * 0.012;
+   953→        c.strokeStyle = i % 2 === 0 ? PAL.palmLeaf : PAL.palmLeafPink;
+   954→        c.lineWidth = 13 * s;
+   955→        c.beginPath();
+   956→        c.moveTo(top.x, top.y);
+   957→        c.quadraticCurveTo(
+   958→          top.x + Math.cos(a) * 52 * s, top.y + Math.sin(a) * 34 * s - 14,
+   959→          top.x + Math.cos(a) * 96 * s, top.y + Math.sin(a) * 66 * s + 12
+   960→        );
+   961→        c.stroke();
+   962→      }
+   963→    }
+   964→    c.restore();
+   965→    // characters by stage
+   966→    const bob = Math.sin(this.globalT * 5) * 8;
+   967→    const gy = 830;
+   968→    if (l.stage === 0) {
+   969→      for (let i = 0; i < 8; i++) {
+   970→        drawRed1(c, {
+   971→          cx: 130 + (i % 4) * 105, bottomY: gy - Math.floor(i / 4) * 70 + (i < 4 ? bob : -bob),
+   972→          scale: 0.62, look: 0.4, mouth: 'smile', apples: 1, time: this.globalT,
+   973→        });
+   974→      }
+   975→      drawEquation(c, ['2', '=', '1', '+', '1'], 288, 430, 0.9);
+   976→    } else if (l.stage === 1) {
+   977→      for (let i = 0; i < 4; i++) {
+   978→        drawOrange2(c, {
+   979→          cx: 150 + i * 95, bottomY: gy + (i % 2 ? bob : -bob),
+   980→          scale: 0.72, look: 0.3, mouth: 'smile', apples: 2, time: this.globalT,
+   981→        });
+   982→      }
+   983→      drawEquation(c, ['4', '=', '2', '+', '2'], 288, 430, 0.9);
+   984→    } else if (l.stage === 2) {
+   985→      drawGreen4(c, { cx: 190, bottomY: gy + bob, scale: 0.9, look: 0.3, mouth: 'smile', apples: 4, armsUp: true, time: this.globalT });
+   986→      drawGreen4(c, { cx: 386, bottomY: gy - bob, scale: 0.9, look: 0.3, mouth: 'smile', apples: 4, armsUp: true, time: this.globalT });
+   987→      drawEquation(c, ['8', '=', '4', '+', '4'], 288, 430, 0.9);
+   988→    } else {
+   989→      const dance = Math.sin(this.globalT * 6) * 14;
+   990→      const bottom = gy - 40 + Math.abs(dance) * 0.4;
+   991→      drawPink8(c, {
+   992→        cx: 288, bottomY: bottom, scale: 1.0,
+   993→        look: 0, mouth: 'smile', apples: 8, armsUp: true, time: this.globalT, squash: Math.abs(Math.sin(this.globalT * 6)) * 0.3,
+   994→      });
+   995→      drawBadge(c, 288, bottom - 300, 8, 1.2);
+   996→      drawEquation(c, ['WE', 'ESCAPED!'], 288, 400, 0.85);
+   997→      if (l.stage >= 4) {
+   998→        // tap to play again
+   999→        const pulse = 1 + Math.sin(this.globalT * 4) * 0.06;
+  1000→        c.save();
+  1001→        c.translate(288, 930);
+  1002→        c.scale(pulse, pulse);
+  1003→        c.fillStyle = 'rgba(20,16,10,0.75)';
+  1004→        roundRect(c, -150, -34, 300, 68, 34);
+  1005→        c.fill();
+  1006→        c.strokeStyle = PAL.gold;
+  1007→        c.lineWidth = 4;
+  1008→        c.stroke();
+  1009→        c.fillStyle = PAL.goldLight;
+  1010→        c.font = '800 28px "Nunito", Arial, sans-serif';
+  1011→        c.textAlign = 'center';
+  1012→        c.textBaseline = 'middle';
+  1013→        c.fillText('TAP TO PLAY AGAIN', 0, 2);
+  1014→        c.restore();
+  1015→      }
+  1016→    }
+  1017→    this.drawMuteBtn();
+  1018→    this.drawParticlesAndShake();
+  1019→  }
+  1020→
+  1021→  // ============================================================
+  1022→  // SHARED SCREENS
+  1023→  // ============================================================
+  1024→  private drawTitle(): void {
+  1025→    const c = this.c;
+  1026→    drawCaveBackground(c, this.globalT);
+  1027→    drawSpotlight(c, 288, 0, 300, 1024, 0.25);
+  1028→    // floating apples
+  1029→    for (let i = 0; i < 5; i++) {
+  1030→      const ax = 90 + i * 100;
+  1031→      const ay = 240 + Math.sin(this.globalT * 2 + i * 1.3) * 16;
+  1032→      drawApple(c, ax, ay, 20, true, this.globalT + i);
+  1033→    }
+  1034→    // logo
+  1035→    c.save();
+  1036→    c.textAlign = 'center';
+  1037→    c.textBaseline = 'middle';
+  1038→    c.font = '900 72px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif';
+  1039→    c.lineWidth = 14;
+  1040→    c.strokeStyle = 'rgba(30,20,5,0.9)';
+  1041→    c.strokeText('NUMBER', 288, 380);
+  1042→    c.fillStyle = PAL.goldLight;
+  1043→    c.fillText('NUMBER', 288, 380);
+  1044→    c.font = '900 66px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif';
+  1045→    c.strokeText('TEMPLE', 288, 452);
+  1046→    c.fillStyle = PAL.white;
+  1047→    c.fillText('TEMPLE', 288, 452);
+  1048→    c.font = '900 56px "Nunito", Arial, sans-serif';
+  1049→    c.strokeText('ESCAPE', 288, 518);
+  1050→    c.fillStyle = PAL.orangeLight;
+  1051→    c.fillText('ESCAPE', 288, 518);
+  1052→    c.restore();
+  1053→    // cast lineup bouncing
+  1054→    const b = Math.sin(this.globalT * 4);
+  1055→    drawGreen4(c, { cx: 110, bottomY: 700 + b * 6, scale: 0.6, look: 0, mouth: 'smile', time: this.globalT });
+  1056→    drawOrange2(c, { cx: 220, bottomY: 700 - b * 6, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1057→    drawRed1(c, { cx: 310, bottomY: 700 + b * 6, scale: 0.5, look: 0, mouth: 'smile', time: this.globalT });
+  1058→    drawPink8(c, { cx: 430, bottomY: 700 - b * 6, scale: 0.5, look: 0, mouth: 'smile', time: this.globalT });
+  1059→    // tap to play
+  1060→    const pulse = 1 + Math.sin(this.globalT * 4) * 0.06;
+  1061→    c.save();
+  1062→    c.translate(288, 850);
+  1063→    c.scale(pulse, pulse);
+  1064→    c.fillStyle = 'rgba(20,16,10,0.8)';
+  1065→    roundRect(c, -160, -40, 320, 80, 40);
+  1066→    c.fill();
+  1067→    c.strokeStyle = PAL.gold;
+  1068→    c.lineWidth = 5;
+  1069→    c.stroke();
+  1070→    c.fillStyle = PAL.goldLight;
+  1071→    c.font = '800 34px "Nunito", Arial, sans-serif';
+  1072→    c.textAlign = 'center';
+  1073→    c.textBaseline = 'middle';
+  1074→    c.fillText('TAP TO PLAY', 0, 2);
+  1075→    c.restore();
+  1076→    // credit
+  1077→    c.fillStyle = 'rgba(255,240,200,0.55)';
+  1078→    c.font = '600 18px "Nunito", Arial, sans-serif';
+  1079→    c.textAlign = 'center';
+  1080→    c.fillText('A numbers adventure  -  1 2 3 4 5 6 7 8', 288, 950);
+  1081→    this.drawMuteBtn();
+  1082→  }
+  1083→
+  1084→  private drawIntro(): void {
+  1085→    const c = this.c;
+  1086→    const info = LEVELS[this.level - 1];
+  1087→    drawCaveBackground(c, this.globalT, 'dark');
+  1088→    drawSpotlight(c, 288, 0, 280, 1024, 0.2);
+  1089→    c.save();
+  1090→    c.textAlign = 'center';
+  1091→    // level chip
+  1092→    c.fillStyle = PAL.gold;
+  1093→    roundRect(c, 288 - 110, 250, 220, 64, 32);
+  1094→    c.fill();
+  1095→    c.fillStyle = '#3a2508';
+  1096→    c.font = '900 34px "Nunito", Arial, sans-serif';
+  1097→    c.textBaseline = 'middle';
+  1098→    c.fillText(`LEVEL ${info.n}`, 288, 284);
+  1099→    // title (auto-fit long names)
+  1100→    const titleSize = info.title.length > 17 ? 34 : info.title.length > 13 ? 42 : 54;
+  1101→    c.font = `900 ${titleSize}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  1102→    c.lineWidth = 10;
+  1103→    c.strokeStyle = 'rgba(20,12,4,0.9)';
+  1104→    const ty = 380;
+  1105→    c.strokeText(info.title, 288, ty);
+  1106→    c.fillStyle = PAL.white;
+  1107→    c.fillText(info.title, 288, ty);
+  1108→    // equation
+  1109→    const eqSize = info.equation.length > 16 ? 30 : 44;
+  1110→    c.font = `800 ${eqSize}px "Nunito", Arial, sans-serif`;
+  1111→    c.fillStyle = PAL.goldLight;
+  1112→    c.fillText(info.equation, 288, ty + 80);
+  1113→    // instruction
+  1114→    c.font = '600 27px "Nunito", Arial, sans-serif';
+  1115→    c.fillStyle = 'rgba(255,245,220,0.92)';
+  1116→    const words = info.instruction.split(' ');
+  1117→    let line = '';
+  1118→    let ly = ty + 160;
+  1119→    for (const wd of words) {
+  1120→      if ((line + wd).length > 26) {
+  1121→        c.fillText(line, 288, ly);
+  1122→        ly += 38;
+  1123→        line = '';
+  1124→      }
+  1125→      line += wd + ' ';
+  1126→    }
+  1127→    if (line) c.fillText(line, 288, ly);
+  1128→    c.restore();
+  1129→    // cast preview
+  1130→    const b = Math.sin(this.globalT * 4);
+  1131→    if (this.level === 1) {
+  1132→      drawGreen4(c, { cx: 190, bottomY: 780 + b * 5, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1133→      drawGreen4(c, { cx: 386, bottomY: 780 - b * 5, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1134→    } else if (this.level === 2) {
+  1135→      drawPink8(c, { cx: 288, bottomY: 800 + b * 5, scale: 0.5, look: 0, mouth: 'grit', time: this.globalT });
+  1136→      drawApple(c, 288, 620, 20, true, this.globalT);
+  1137→    } else if (this.level === 3) {
+  1138→      drawPink8(c, { cx: 220, bottomY: 790, scale: 0.48, look: 0.5, mouth: 'worried', time: this.globalT });
+  1139→      drawBoulder(c, 460, 740, 55, this.globalT);
+  1140→    } else if (this.level === 4) {
+  1141→      drawGreen4(c, { cx: 200, bottomY: 780, scale: 0.5, look: 0.6, mouth: 'worried', time: this.globalT });
+  1142→      drawOrange2(c, { cx: 380, bottomY: 780, scale: 0.5, look: 0.6, mouth: 'smile', time: this.globalT });
+  1143→    } else if (this.level === 5) {
+  1144→      drawRed1(c, { cx: 200, bottomY: 780, scale: 0.5, look: 0.7, mouth: 'grit', time: this.globalT });
+  1145→      drawGuardEye(c, 420, 700, 0.5, this.globalT);
+  1146→    }
+  1147→    // tap to start
+  1148→    const pulse = 1 + Math.sin(this.globalT * 4) * 0.06;
+  1149→    c.save();
+  1150→    c.translate(288, 900);
+  1151→    c.scale(pulse, pulse);
+  1152→    c.fillStyle = 'rgba(20,16,10,0.8)';
+  1153→    roundRect(c, -170, -40, 340, 80, 40);
+  1154→    c.fill();
+  1155→    c.strokeStyle = PAL.gold;
+  1156→    c.lineWidth = 5;
+  1157→    c.stroke();
+  1158→    c.fillStyle = PAL.goldLight;
+  1159→    c.font = '800 32px "Nunito", Arial, sans-serif';
+  1160→    c.textAlign = 'center';
+  1161→    c.textBaseline = 'middle';
+  1162→    c.fillText('TAP TO START', 0, 2);
+  1163→    c.restore();
+  1164→    this.drawMuteBtn();
+  1165→  }
+  1166→
+  1167→  private drawReveal(): void {
+  1168→    const c = this.c;
+  1169→    drawStarburst(c, this.globalT);
+  1170→    const parts = this.revealParts;
+  1171→    c.save();
+  1172→    const text = parts.join(' ');
+  1173→    // auto-fit: shrink long text to fit the screen
+  1174→    let size = 84;
+  1175→    c.font = `900 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  1176→    while (c.measureText(text).width > 520 && size > 28) {
+  1177→      size -= 4;
+  1178→      c.font = `900 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  1179→    }
+  1180→    c.textAlign = 'center';
+  1181→    c.textBaseline = 'middle';
+  1182→    c.fillStyle = PAL.black;
+  1183→    c.fillText(text, 288, 470);
+  1184→    c.restore();
+  1185→    // mini characters
+  1186→    const pop = Math.min(1, this.stateT / 0.3);
+  1187→    c.save();
+  1188→    c.globalAlpha = pop;
+  1189→    c.translate(288, 660);
+  1190→    const s = 0.9 + Math.sin(this.stateT * 6) * 0.05;
+  1191→    c.scale(s, s);
+  1192→    if (this.level === 1) drawPink8(c, { cx: 0, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', armsUp: true, time: this.globalT });
+  1193→    else if (this.level === 2) drawApple(c, 0, 0, 34, true, this.globalT);
+  1194→    else if (this.level === 3) {
+  1195→      drawGreen4(c, { cx: -80, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 4, time: this.globalT });
+  1196→      drawGreen4(c, { cx: 80, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 4, time: this.globalT });
+  1197→    } else if (this.level === 4) {
+  1198→      drawOrange2(c, { cx: -70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 2, time: this.globalT });
+  1199→      drawOrange2(c, { cx: 0, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 2, time: this.globalT });
+  1200→      drawOrange2(c, { cx: 70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', apples: 2, time: this.globalT });
+  1201→    } else if (this.level === 5) {
+  1202→      drawRed1(c, { cx: -70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1203→      drawRed1(c, { cx: 0, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1204→      drawRed1(c, { cx: 70, bottomY: 90, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+  1205→    }
+  1206→    c.restore();
+  1207→    // sparkles during reveal
+  1208→    drawParticles(this.c, this.particles);
+  1209→  }
+  1210→
+  1211→  private drawRetry(): void {
+  1212→    const c = this.c;
+  1213→    c.save();
+  1214→    c.fillStyle = 'rgba(10,6,2,0.82)';
+  1215→    c.fillRect(0, 0, W, H);
+  1216→    c.textAlign = 'center';
+  1217→    c.textBaseline = 'middle';
+  1218→    c.font = '900 52px "Nunito", Arial, sans-serif';
+  1219→    c.fillStyle = PAL.redLight;
+  1220→    c.fillText(this.retryMsg, 288, 440);
+  1221→    c.font = '800 30px "Nunito", Arial, sans-serif';
+  1222→    c.fillStyle = PAL.goldLight;
+  1223→    c.fillText('TRY AGAIN!', 288, 520);
+  1224→    c.restore();
+  1225→  }
+  1226→
+  1227→  // ============================================================
+  1228→  // HUD helpers
+  1229→  // ============================================================
+  1230→  private drawMuteBtn(): void {
+  1231→    const c = this.c;
+  1232→    c.save();
+  1233→    c.fillStyle = 'rgba(20,16,10,0.7)';
+  1234→    c.beginPath();
+  1235→    c.arc(522, 46, 26, 0, Math.PI * 2);
+  1236→    c.fill();
+  1237→    c.strokeStyle = 'rgba(255,235,180,0.6)';
+  1238→    c.lineWidth = 2;
+  1239→    c.stroke();
+  1240→    c.fillStyle = isMuted() ? 'rgba(255,235,180,0.45)' : PAL.goldLight;
+  1241→    c.font = '800 22px "Nunito", Arial, sans-serif';
+  1242→    c.textAlign = 'center';
+  1243→    c.textBaseline = 'middle';
+  1244→    c.fillText(isMuted() ? 'OFF' : 'SND', 522, 47);
+  1245→    c.restore();
+  1246→  }
+  1247→
+  1248→  private drawHint(text: string): void {
+  1249→    if (!text) return;
+  1250→    this.c.save();
+  1251→    this.c.font = '700 22px "Nunito", Arial, sans-serif';
+  1252→    this.c.textAlign = 'center';
+  1253→    this.c.textBaseline = 'middle';
+  1254→    this.c.fillStyle = 'rgba(255,245,220,0.85)';
+  1255→    this.c.fillText(text, 288, 985);
+  1256→    this.c.restore();
+  1257→  }
+  1258→
+  1259→  private drawParticlesAndShake(): void {
+  1260→    drawParticles(this.c, this.particles);
+  1261→    if (this.shake > 0) this.shake = Math.max(0, this.shake - 0.016);
+  1262→  }
+  1263→
+  1264→  // ============================================================
+  1265→  // MAIN LOOP
+  1266→  // ============================================================
+  1267→  private loop(ts: number): void {
+  1268→    this.raf = requestAnimationFrame(this.loop);
+  1269→    if (!this.lastT) this.lastT = ts;
+  1270→    let dt = (ts - this.lastT) / 1000;
+  1271→    this.lastT = ts;
+  1272→    if (dt > 0.05) dt = 0.05;
+  1273→    this.globalT += dt;
+  1274→    this.stateT += dt;
+  1275→
+  1276→    const c = this.c;
+  1277→    // scale design space
+  1278→    const dpr = Math.min(2, window.devicePixelRatio || 1);
+  1279→    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  1280→    const rect = this.canvas.getBoundingClientRect();
+  1281→    const sx = rect.width / W;
+  1282→    const sy = rect.height / H;
+  1283→    c.setTransform(dpr * sx, 0, 0, dpr * sy, 0, 0);
+  1284→
+  1285→    // letterbox bg
+  1286→    c.fillStyle = PAL.bgDark;
+  1287→    c.fillRect(0, 0, W, H);
+  1288→
+  1289→    updateParticles(this.particles, dt * this.timeScale, 300);
+  1290→
+  1291→    switch (this.state) {
+  1292→      case 'title':
+  1293→        this.drawTitle();
+  1294→        break;
+  1295→      case 'intro':
+  1296→        this.drawIntro();
+  1297→        break;
+  1298→      case 'reveal': {
+  1299→        this.drawReveal();
+  1300→        if (this.stateT > 1.9 && this.pendingNext) {
+  1301→          const next = this.pendingNext;
+  1302→          this.pendingNext = null;
+  1303→          next();
+  1304→        }
+  1305→        break;
+  1306→      }
+  1307→      case 'retry': {
+  1308→        // keep drawing the level behind
+  1309→        this.drawLevelFrozen();
+  1310→        this.drawRetry();
+  1311→        if (this.stateT > 1.4) {
+  1312→          this.startLevel(this.level);
+  1313→        }
+  1314→        break;
+  1315→      }
+  1316→      case 'win':
+  1317→        this.drawL6();
+  1318→        break;
+  1319→      case 'play':
+  1320→        this.updatePlay(dt);
+  1321→        this.drawPlay();
+  1322→        break;
+  1323→    }
+  1324→  }
+  1325→
+  1326→  private drawLevelFrozen(): void {
+  1327→    // draw the last level frame statically behind retry overlay
+  1328→    if (this.level === 1) this.drawL1();
+  1329→    else if (this.level === 2) this.drawL2();
+  1330→    else if (this.level === 3) this.drawL3();
+  1331→    else if (this.level === 4) this.drawL4();
+  1332→    else if (this.level === 5) this.drawL5();
+  1333→    else this.drawL6();
+  1334→  }
+  1335→
+  1336→  private updatePlay(dt: number): void {
+  1337→    const d = dt * this.timeScale;
+  1338→    if (this.level === 1) this.updateL1(d);
+  1339→    else if (this.level === 2) this.updateL2(d);
+  1340→    else if (this.level === 3) this.updateL3(d);
+  1341→    else if (this.level === 4) this.updateL4(d);
+  1342→    else if (this.level === 5) this.updateL5(d);
+  1343→    else if (this.level === 6) this.updateL6(d);
+  1344→  }
+  1345→
+  1346→  private drawPlay(): void {
+  1347→    if (this.level === 1) this.drawL1();
+  1348→    else if (this.level === 2) this.drawL2();
+  1349→    else if (this.level === 3) this.drawL3();
+  1350→    else if (this.level === 4) this.drawL4();
+  1351→    else if (this.level === 5) this.drawL5();
+  1352→    else if (this.level === 6) this.drawL6();
+  1353→  }
+  1354→}
+  1355→

@@ -17,8 +17,8 @@ import {
   drawCaveBackground, drawSpotlight, drawGoldenDoor, drawPlanks,
   drawBallPit, drawSeesaw, drawBoulder, drawBridge, drawTunnelArch,
   drawGuardEye, drawExitDoor, drawBadge,
-  drawStarburst, drawEquation, drawChipEquation, drawAppleCounter,
-  drawProgressBar, drawSplitButton, drawBanner, drawApple,
+  drawStarburst, drawEquation, drawChipEquation,
+  drawSplitButton, drawApple,
   Particle, updateParticles, drawParticles, spawnSparkles,
 } from './sprites';
 import {
@@ -27,6 +27,7 @@ import {
   sfxAlarm, sfxBonk, sfxSneak, sfxFanfare, sfxChime,
   startRumble, stopRumble, startMusic, stopMusic,
 } from './audio';
+import { setEquationFont } from './sprites';
 
 export const W = 576;
 export const H = 1024;
@@ -41,12 +42,12 @@ interface LevelInfo {
 }
 
 const LEVELS: LevelInfo[] = [
-  { n: 1, title: 'THE BALANCE', equation: '4 + 4 = ?', instruction: 'Tap the HIGH side of the beam to keep it level!' },
-  { n: 2, title: 'GOLDEN APPLE CLIMB', equation: '1 2 3 4 5 6 7 8', instruction: 'Tap left / right to catch 8 golden apples!' },
-  { n: 3, title: 'GIANT ROAMING ALERT', equation: '8 = 4 + 4', instruction: 'Tap SPLIT when the 8 is on the bridge!' },
-  { n: 4, title: 'SPLIT IN HALF', equation: '4 = 2 + 2', instruction: 'Tap SPLIT at the golden line - only 2s fit!' },
-  { n: 5, title: 'THE EXIT', equation: '2 = 1 + 1', instruction: 'Tap to hop! FREEZE when the eye opens!' },
-  { n: 6, title: 'WE ESCAPED!', equation: '1+1=2  2+2=4  4+4=8', instruction: '' },
+  { n: 1, title: 'THE BALANCE', equation: '4 + 4', instruction: '' },
+  { n: 2, title: 'GOLDEN APPLE CLIMB', equation: '8', instruction: '' },
+  { n: 3, title: 'GIANT ROAMING ALERT', equation: '8 = 4 + 4', instruction: '' },
+  { n: 4, title: 'SPLIT IN HALF', equation: '4 = 2 + 2', instruction: '' },
+  { n: 5, title: 'THE EXIT', equation: '2 = 1 + 1', instruction: '' },
+  { n: 6, title: 'WE ESCAPED!', equation: '', instruction: '' },
 ];
 
 interface Apple { x: number; y: number; vy: number; caught: boolean; dead: boolean; t: number }
@@ -112,6 +113,11 @@ export class Game {
     const c = canvas.getContext('2d');
     if (!c) throw new Error('no 2d context');
     this.c = c;
+    // use the self-hosted Nunito (next/font) for equations, once available
+    try {
+      const fam = getComputedStyle(document.body).getPropertyValue('--font-nunito').trim();
+      setEquationFont(fam);
+    } catch { /* keep fallback */ }
     this.resize();
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
@@ -179,10 +185,13 @@ export class Game {
   private enterIntro(n: number): void {
     stopRumble();
     this.level = n;
+    if (n === 6) {
+      this.startLevel(6);
+      return;
+    }
     this.state = 'intro';
     this.stateT = 0;
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
-    say(`Level ${n}`, { rate: 1.1, pitch: 1.2 });
   }
 
   private startLevel(n: number): void {
@@ -193,19 +202,14 @@ export class Game {
     this.timeScale = 1;
     if (n === 1) {
       this.l1 = { angle: 0.15, angVel: 0, count: 0, bounceL: 0, bounceR: 0, windT: 0, merged: false, mergeT: 0, done: false };
-      say('Two fours on the balance! Tap the high side!', { rate: 1.05 });
     } else if (n === 2) {
       this.l2 = { y: 760, laneX: 288, targetX: 288, apples: [], caught: 0, spawnT: 0.5, done: false, doneT: 0, climbBob: 0 };
-      say('Climb! Catch the golden apples!', { rate: 1.05 });
     } else if (n === 3) {
       this.l3 = { b8x: 0, boulderX: -160, alertT: 0, splitT: -1, fours: 0, boulderFall: 0, crashed: false, done: false, bridgeStart: 820, bridgeEnd: 1340, walkT: 0 };
-      say('Time for a quick exit!', { rate: 1.05 });
     } else if (n === 4) {
       this.l4 = { x1: 70, x2: 150, splitT: -1, twos: 0, tunnelX: 468, done: false, failed: false, bonkT: -1, warnT: 0 };
-      say(`We're not going to make it! What now?`, { rate: 1.0 });
     } else if (n === 5) {
       this.l5 = { phase: 'pre', progress: 150, lastSafe: 0, eyeCycle: 0, eyeOpen: 0, caughtFlash: 0, hopT: -1, done: false, doorT: 0, warnSound: false };
-      say('The exit! Sneak past the giant eye!', { rate: 1.0 });
     } else if (n === 6) {
       this.l6 = { stage: 0, t: 0, confettiT: 0 };
       stopMusic();
@@ -261,7 +265,6 @@ export class Game {
       sfxBoing(side < 0 ? 1.1 : 0.9);
       sayNumber(Math.min(8, l.count));
       spawnSparkles(this.particles, W / 2 + side * 180, 620, 6, PAL.goldLight);
-      if (l.count === 4) say('Keep going! Keep going!', { rate: 1.15 });
       if (l.count >= 8) {
         l.merged = true;
         l.mergeT = 0;
@@ -348,12 +351,9 @@ export class Game {
         drawBadge(c, 288, bottom - 300, 8, 1.1);
       }
     }
-    // equation chips
-    const chips: Array<'4' | '+' | '=' | '8' | '?'> = ['4', '+', '4', '=', l.count >= 8 ? '8' : '?'];
+    // equation, exactly like the video: "4 + 4"
+    const chips: Array<'4' | '+' | '=' | '8' | '?'> = l.merged ? ['4', '+', '4', '=', '8'] : ['4', '+', '4'];
     drawChipEquation(c, 92, 96, chips);
-    // balance meter
-    drawProgressBar(c, 92, 170, 240, 22, l.count / 8);
-    this.drawHint('TAP THE HIGH SIDE!');
     this.drawMuteBtn();
     this.drawParticlesAndShake();
   }
@@ -406,7 +406,7 @@ export class Game {
             if (l.caught === 8) {
               l.done = true;
               l.doneT = 0;
-              say('The golden delicious!', { rate: 1.0, pitch: 1.2 });
+              say('The golden delicious!', { rate: 1.0, pitch: 1.2 }); // show line
               sfxFanfare();
               spawnSparkles(this.particles, l.laneX, l.y - 110, 60, PAL.goldLight);
             }
@@ -419,7 +419,7 @@ export class Game {
     } else {
       l.doneT += dt;
       if (l.doneT > 2.3) {
-        this.enterReveal(['8', 'GOLDEN', 'APPLES'], () => this.enterIntro(3));
+        this.enterReveal(['8'], () => this.enterIntro(3));
       }
     }
   }
@@ -429,11 +429,11 @@ export class Game {
     const l = this.l2;
     drawCaveBackground(c, this.globalT, 'dark');
     drawSpotlight(c, 288, 0, 230, 1024, 0.16);
-    // climbing pole
+    // climbing pole (grey steel, like the video)
     const pg = c.createLinearGradient(283, 0, 293, 0);
-    pg.addColorStop(0, PAL.goldDark);
-    pg.addColorStop(0.5, PAL.goldLight);
-    pg.addColorStop(1, PAL.goldDark);
+    pg.addColorStop(0, '#6e6e6e');
+    pg.addColorStop(0.5, '#b5b5b5');
+    pg.addColorStop(1, '#5a5a5a');
     c.fillStyle = pg;
     c.fillRect(283, 120, 10, 720);
     // platform at bottom
@@ -456,9 +456,6 @@ export class Game {
     for (const a of l.apples) {
       if (a.caught && !a.dead) drawApple(c, a.x, a.y, 18, true, a.t * 4);
     }
-    drawAppleCounter(c, 100, 40, l.caught, 8);
-    if (l.done) drawBanner(c, 'THE GOLDEN DELICIOUS!', 940, this.stateT, PAL.goldLight, 36);
-    else this.drawHint('TAP LEFT / RIGHT TO CATCH!');
     this.drawMuteBtn();
     this.drawParticlesAndShake();
   }
@@ -613,20 +610,10 @@ export class Game {
       }
     }
     c.restore();
-    // HUD
-    if (l.alertT > 0 && l.splitT < 0) {
-      const blink = Math.sin(this.stateT * 10) > -0.3;
-      if (blink) drawBanner(c, 'GIANT ROAMING ALERT!', 200, this.stateT, PAL.red, 38);
-    }
-    drawProgressBar(c, 100, 52, 300, 20, Math.min(1, l.b8x / (l.bridgeEnd - 40)));
+    // split button (icon only)
     if (l.splitT < 0 && !l.done) {
       drawSplitButton(c, 288, 900, 74, this.globalT);
-      this.drawHint('');
     }
-    if (this.showTooEarlyFlash > 0) {
-      drawBanner(c, 'WAIT FOR THE BRIDGE!', 200, this.stateT, PAL.orangeLight, 32);
-    }
-    if (l.done) drawBanner(c, 'PHEW! SAFE!', 200, this.stateT, PAL.greenLight, 40);
     this.drawMuteBtn();
     this.drawParticlesAndShake();
   }
@@ -694,10 +681,10 @@ export class Game {
     drawPlanks(c, -20, groundY, W + 40, 44);
     // tunnel arch (only 2s fit)
     drawTunnelArch(c, l.tunnelX, W - l.tunnelX + 60, groundY, 100);
-    // golden split zone marker
+    // golden split zone marker (visual only, no words)
     if (l.splitT < 0 && !l.failed) {
       c.save();
-      c.strokeStyle = 'rgba(255,215,90,0.9)';
+      c.strokeStyle = `rgba(255,215,90,${0.55 + Math.sin(this.globalT * 4) * 0.25})`;
       c.setLineDash([14, 10]);
       c.lineWidth = 5;
       c.beginPath();
@@ -705,10 +692,6 @@ export class Game {
       c.lineTo(210, groundY - 340);
       c.stroke();
       c.setLineDash([]);
-      c.fillStyle = 'rgba(255,215,90,0.9)';
-      c.font = '800 24px "Nunito", Arial, sans-serif';
-      c.textAlign = 'center';
-      c.fillText('SPLIT HERE', 210, groundY - 360);
       c.restore();
     }
     const bob = Math.sin(this.globalT * 9) * 4;
@@ -737,13 +720,6 @@ export class Game {
         }
       }
     }
-    if (this.showTooEarlyFlash > 0) {
-      drawBanner(c, 'WAIT FOR THE GOLD LINE!', 240, this.stateT, PAL.orangeLight, 30);
-    }
-    if (l.warnT > 0.2 && l.warnT < 2.2 && l.splitT < 0) {
-      drawBanner(c, "WE'RE NOT GOING TO MAKE IT!", 200, this.stateT, PAL.red, 30);
-    }
-    drawProgressBar(c, 100, 52, 300, 20, Math.min(1, l.x2 / (l.tunnelX - 60)));
     if (l.splitT < 0 && !l.failed) drawSplitButton(c, 288, 900, 74, this.globalT);
     this.drawMuteBtn();
     this.drawParticlesAndShake();
@@ -854,26 +830,29 @@ export class Game {
       }
       drawBadge(c, baseX, groundY - 105, 1, 0.7);
     }
-    // danger flash
+    // danger flash (visual only)
     if (l.caughtFlash > 0) {
       c.save();
       c.globalAlpha = l.caughtFlash * 0.35;
       c.fillStyle = PAL.red;
       c.fillRect(0, 0, W, H);
       c.restore();
-      drawBanner(c, 'THE EYE SAW YOU!', 200, this.stateT, PAL.red, 36);
     }
-    drawProgressBar(c, 100, 52, 300, 20, Math.min(1, l.progress / 340));
+    // golden warning glow around the eye when open
+    if (l.eyeOpen > 0.45 && !l.done) {
+      c.save();
+      c.strokeStyle = `rgba(255,215,90,${0.4 + Math.sin(this.globalT * 9) * 0.25})`;
+      c.lineWidth = 7;
+      c.beginPath();
+      c.arc(430, 300, 128, 0, Math.PI * 2);
+      c.stroke();
+      c.restore();
+    }
     if (l.phase === 'pre') {
       drawSplitButton(c, 288, 900, 74, this.globalT);
     } else if (!l.done) {
-      drawSplitButton(c, 288, 900, 74, this.globalT, 'HOP!');
-      if (l.eyeOpen > 0.45) {
-        drawBanner(c, 'FREEZE!', 200, this.stateT, PAL.goldLight, 40);
-      }
+      drawSplitButton(c, 288, 900, 74, this.globalT, 'HOP');
     }
-    if (l.done) drawBanner(c, 'THE COAST IS CLEAR!', 200, this.stateT, PAL.greenLight, 36);
-    this.drawHint(l.phase === 'pre' ? '' : 'HOP IN THE DARK - FREEZE IN THE LIGHT!');
     this.drawMuteBtn();
     this.drawParticlesAndShake();
   }
@@ -993,24 +972,25 @@ export class Game {
         look: 0, mouth: 'smile', apples: 8, armsUp: true, time: this.globalT, squash: Math.abs(Math.sin(this.globalT * 6)) * 0.3,
       });
       drawBadge(c, 288, bottom - 300, 8, 1.2);
-      drawEquation(c, ['WE', 'ESCAPED!'], 288, 400, 0.85);
       if (l.stage >= 4) {
-        // tap to play again
-        const pulse = 1 + Math.sin(this.globalT * 4) * 0.06;
+        // replay icon (circular arrow), pulsing
+        const pulse = 1 + Math.sin(this.globalT * 4) * 0.08;
         c.save();
         c.translate(288, 930);
         c.scale(pulse, pulse);
-        c.fillStyle = 'rgba(20,16,10,0.75)';
-        roundRect(c, -150, -34, 300, 68, 34);
-        c.fill();
-        c.strokeStyle = PAL.gold;
-        c.lineWidth = 4;
+        c.strokeStyle = PAL.goldLight;
+        c.lineWidth = 6;
+        c.lineCap = 'round';
+        c.beginPath();
+        c.arc(0, 0, 26, -0.4, Math.PI * 1.55);
         c.stroke();
         c.fillStyle = PAL.goldLight;
-        c.font = '800 28px "Nunito", Arial, sans-serif';
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillText('TAP TO PLAY AGAIN', 0, 2);
+        c.beginPath();
+        c.moveTo(30, -14);
+        c.lineTo(34, 8);
+        c.lineTo(12, 0);
+        c.closePath();
+        c.fill();
         c.restore();
       }
     }
@@ -1023,145 +1003,83 @@ export class Game {
   // ============================================================
   private drawTitle(): void {
     const c = this.c;
+    // the video's opening scene: golden door, seesaw, two green 4s
     drawCaveBackground(c, this.globalT);
-    drawSpotlight(c, 288, 0, 300, 1024, 0.25);
-    // floating apples
-    for (let i = 0; i < 5; i++) {
-      const ax = 90 + i * 100;
-      const ay = 240 + Math.sin(this.globalT * 2 + i * 1.3) * 16;
-      drawApple(c, ax, ay, 20, true, this.globalT + i);
-    }
-    // logo
+    drawSpotlight(c, 288, 0, 260, 780, 0.22);
+    drawGoldenDoor(c, 288, 640, 96, 150, 0.4 + 0.6 * Math.abs(Math.sin(this.globalT * 0.7)));
+    drawBallPit(c, 770, 254, this.globalT);
+    const sway = Math.sin(this.globalT * 0.9) * 0.12;
+    drawSeesaw(c, 288, 640, 216, sway);
+    const sa = Math.sin(sway);
+    const ca = Math.cos(sway);
+    const bobA = Math.sin(this.globalT * 2.2) * 3;
+    drawGreen4(c, { cx: 288 - 200 * ca, bottomY: 640 - 200 * sa - 9 + bobA, scale: 0.78, look: 0, mouth: 'smile', time: this.globalT });
+    drawGreen4(c, { cx: 288 + 200 * ca, bottomY: 640 + 200 * sa - 9 - bobA, scale: 0.78, look: 0, mouth: 'smile', time: this.globalT });
+    // the only words in the game: the equation
+    drawChipEquation(c, 92, 96, ['4', '+', '4']);
+    // pulsing tap ripple
+    const ripple = (this.globalT % 1.2) / 1.2;
     c.save();
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.font = '900 72px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif';
-    c.lineWidth = 14;
-    c.strokeStyle = 'rgba(30,20,5,0.9)';
-    c.strokeText('NUMBER', 288, 380);
-    c.fillStyle = PAL.goldLight;
-    c.fillText('NUMBER', 288, 380);
-    c.font = '900 66px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif';
-    c.strokeText('TEMPLE', 288, 452);
-    c.fillStyle = PAL.white;
-    c.fillText('TEMPLE', 288, 452);
-    c.font = '900 56px "Nunito", Arial, sans-serif';
-    c.strokeText('ESCAPE', 288, 518);
-    c.fillStyle = PAL.orangeLight;
-    c.fillText('ESCAPE', 288, 518);
-    c.restore();
-    // cast lineup bouncing
-    const b = Math.sin(this.globalT * 4);
-    drawGreen4(c, { cx: 110, bottomY: 700 + b * 6, scale: 0.6, look: 0, mouth: 'smile', time: this.globalT });
-    drawOrange2(c, { cx: 220, bottomY: 700 - b * 6, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
-    drawRed1(c, { cx: 310, bottomY: 700 + b * 6, scale: 0.5, look: 0, mouth: 'smile', time: this.globalT });
-    drawPink8(c, { cx: 430, bottomY: 700 - b * 6, scale: 0.5, look: 0, mouth: 'smile', time: this.globalT });
-    // tap to play
-    const pulse = 1 + Math.sin(this.globalT * 4) * 0.06;
-    c.save();
-    c.translate(288, 850);
-    c.scale(pulse, pulse);
-    c.fillStyle = 'rgba(20,16,10,0.8)';
-    roundRect(c, -160, -40, 320, 80, 40);
+    c.strokeStyle = `rgba(255,215,102,${(1 - ripple) * 0.7})`;
+    c.lineWidth = 4;
+    c.beginPath();
+    c.arc(288, 905, 20 + ripple * 44, 0, Math.PI * 2);
+    c.stroke();
+    c.fillStyle = 'rgba(20,14,6,0.75)';
+    c.beginPath();
+    c.arc(288, 905, 26, 0, Math.PI * 2);
     c.fill();
     c.strokeStyle = PAL.gold;
-    c.lineWidth = 5;
+    c.lineWidth = 3;
     c.stroke();
+    // pointing-hand icon
     c.fillStyle = PAL.goldLight;
-    c.font = '800 34px "Nunito", Arial, sans-serif';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText('TAP TO PLAY', 0, 2);
+    roundRect(c, 282, 890, 12, 22, 6);
+    c.fill();
+    c.beginPath();
+    c.arc(288, 886, 7, 0, Math.PI * 2);
+    c.fill();
     c.restore();
-    // credit
-    c.fillStyle = 'rgba(255,240,200,0.55)';
-    c.font = '600 18px "Nunito", Arial, sans-serif';
-    c.textAlign = 'center';
-    c.fillText('A numbers adventure  -  1 2 3 4 5 6 7 8', 288, 950);
     this.drawMuteBtn();
   }
 
   private drawIntro(): void {
     const c = this.c;
+    // quick equation card, exactly like the show's reveal cards
+    drawStarburst(c, this.globalT);
     const info = LEVELS[this.level - 1];
-    drawCaveBackground(c, this.globalT, 'dark');
-    drawSpotlight(c, 288, 0, 280, 1024, 0.2);
+    const fade = Math.min(1, this.stateT / 0.25);
     c.save();
-    c.textAlign = 'center';
-    // level chip
-    c.fillStyle = PAL.gold;
-    roundRect(c, 288 - 110, 250, 220, 64, 32);
-    c.fill();
-    c.fillStyle = '#3a2508';
-    c.font = '900 34px "Nunito", Arial, sans-serif';
-    c.textBaseline = 'middle';
-    c.fillText(`LEVEL ${info.n}`, 288, 284);
-    // title (auto-fit long names)
-    const titleSize = info.title.length > 17 ? 34 : info.title.length > 13 ? 42 : 54;
-    c.font = `900 ${titleSize}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
-    c.lineWidth = 10;
-    c.strokeStyle = 'rgba(20,12,4,0.9)';
-    const ty = 380;
-    c.strokeText(info.title, 288, ty);
-    c.fillStyle = PAL.white;
-    c.fillText(info.title, 288, ty);
-    // equation
-    const eqSize = info.equation.length > 16 ? 30 : 44;
-    c.font = `800 ${eqSize}px "Nunito", Arial, sans-serif`;
-    c.fillStyle = PAL.goldLight;
-    c.fillText(info.equation, 288, ty + 80);
-    // instruction
-    c.font = '600 27px "Nunito", Arial, sans-serif';
-    c.fillStyle = 'rgba(255,245,220,0.92)';
-    const words = info.instruction.split(' ');
-    let line = '';
-    let ly = ty + 160;
-    for (const wd of words) {
-      if ((line + wd).length > 26) {
-        c.fillText(line, 288, ly);
-        ly += 38;
-        line = '';
-      }
-      line += wd + ' ';
+    c.globalAlpha = fade;
+    if (info.equation) {
+      drawEquation(c, info.equation.split(' '), 288, 470, 1.05);
     }
-    if (line) c.fillText(line, 288, ly);
     c.restore();
-    // cast preview
+    // mini characters popping in
+    const pop = Math.min(1, this.stateT / 0.3);
+    c.save();
+    c.globalAlpha = pop;
+    c.translate(288, 660);
+    const s = 0.9 + Math.sin(this.stateT * 6) * 0.05;
+    c.scale(s, s);
     const b = Math.sin(this.globalT * 4);
     if (this.level === 1) {
-      drawGreen4(c, { cx: 190, bottomY: 780 + b * 5, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
-      drawGreen4(c, { cx: 386, bottomY: 780 - b * 5, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+      drawGreen4(c, { cx: -90, bottomY: 90 + b * 4, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
+      drawGreen4(c, { cx: 90, bottomY: 90 - b * 4, scale: 0.55, look: 0, mouth: 'smile', time: this.globalT });
     } else if (this.level === 2) {
-      drawPink8(c, { cx: 288, bottomY: 800 + b * 5, scale: 0.5, look: 0, mouth: 'grit', time: this.globalT });
-      drawApple(c, 288, 620, 20, true, this.globalT);
+      drawPink8(c, { cx: 0, bottomY: 120 + b * 4, scale: 0.45, look: 0, mouth: 'grit', time: this.globalT });
+      drawApple(c, 0, -20, 30, true, this.globalT);
     } else if (this.level === 3) {
-      drawPink8(c, { cx: 220, bottomY: 790, scale: 0.48, look: 0.5, mouth: 'worried', time: this.globalT });
-      drawBoulder(c, 460, 740, 55, this.globalT);
+      drawPink8(c, { cx: -60, bottomY: 110, scale: 0.45, look: 0.5, mouth: 'worried', time: this.globalT });
+      drawBoulder(c, 80, 60, 52, this.globalT);
     } else if (this.level === 4) {
-      drawGreen4(c, { cx: 200, bottomY: 780, scale: 0.5, look: 0.6, mouth: 'worried', time: this.globalT });
-      drawOrange2(c, { cx: 380, bottomY: 780, scale: 0.5, look: 0.6, mouth: 'smile', time: this.globalT });
+      drawGreen4(c, { cx: -80, bottomY: 100 + b * 4, scale: 0.5, look: 0.6, mouth: 'worried', time: this.globalT });
+      drawOrange2(c, { cx: 80, bottomY: 100 - b * 4, scale: 0.5, look: 0.6, mouth: 'smile', time: this.globalT });
     } else if (this.level === 5) {
-      drawRed1(c, { cx: 200, bottomY: 780, scale: 0.5, look: 0.7, mouth: 'grit', time: this.globalT });
-      drawGuardEye(c, 420, 700, 0.5, this.globalT);
+      drawOrange2(c, { cx: -80, bottomY: 100 + b * 4, scale: 0.5, look: 0.7, mouth: 'grit', time: this.globalT });
+      drawGuardEye(c, 90, -60, 0.5, this.globalT);
     }
-    // tap to start
-    const pulse = 1 + Math.sin(this.globalT * 4) * 0.06;
-    c.save();
-    c.translate(288, 900);
-    c.scale(pulse, pulse);
-    c.fillStyle = 'rgba(20,16,10,0.8)';
-    roundRect(c, -170, -40, 340, 80, 40);
-    c.fill();
-    c.strokeStyle = PAL.gold;
-    c.lineWidth = 5;
-    c.stroke();
-    c.fillStyle = PAL.goldLight;
-    c.font = '800 32px "Nunito", Arial, sans-serif';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText('TAP TO START', 0, 2);
     c.restore();
-    this.drawMuteBtn();
   }
 
   private drawReveal(): void {
@@ -1210,17 +1128,23 @@ export class Game {
 
   private drawRetry(): void {
     const c = this.c;
+    // word-free fail overlay: dark + red pulse + exclamation mark
+    const k = Math.min(1, this.stateT / 0.25);
     c.save();
-    c.fillStyle = 'rgba(10,6,2,0.82)';
+    c.globalAlpha = k * 0.82;
+    c.fillStyle = 'rgba(10,6,2,0.9)';
     c.fillRect(0, 0, W, H);
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.font = '900 52px "Nunito", Arial, sans-serif';
+    c.restore();
+    const pulse = 1 + Math.sin(this.stateT * 8) * 0.05;
+    c.save();
+    c.translate(288, 470);
+    c.scale(pulse, pulse);
     c.fillStyle = PAL.redLight;
-    c.fillText(this.retryMsg, 288, 440);
-    c.font = '800 30px "Nunito", Arial, sans-serif';
-    c.fillStyle = PAL.goldLight;
-    c.fillText('TRY AGAIN!', 288, 520);
+    roundRect(c, -17, -90, 34, 130, 17);
+    c.fill();
+    c.beginPath();
+    c.arc(0, 74, 18, 0, Math.PI * 2);
+    c.fill();
     c.restore();
   }
 
@@ -1237,23 +1161,39 @@ export class Game {
     c.strokeStyle = 'rgba(255,235,180,0.6)';
     c.lineWidth = 2;
     c.stroke();
+    // speaker icon
     c.fillStyle = isMuted() ? 'rgba(255,235,180,0.45)' : PAL.goldLight;
-    c.font = '800 22px "Nunito", Arial, sans-serif';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(isMuted() ? 'OFF' : 'SND', 522, 47);
+    c.beginPath();
+    c.moveTo(510, 41);
+    c.lineTo(517, 41);
+    c.lineTo(524, 34);
+    c.lineTo(524, 58);
+    c.lineTo(517, 51);
+    c.lineTo(510, 51);
+    c.closePath();
+    c.fill();
+    if (isMuted()) {
+      c.strokeStyle = PAL.redLight;
+      c.lineWidth = 3.5;
+      c.lineCap = 'round';
+      c.beginPath();
+      c.moveTo(530, 38);
+      c.lineTo(542, 54);
+      c.moveTo(542, 38);
+      c.lineTo(530, 54);
+      c.stroke();
+    } else {
+      c.strokeStyle = PAL.goldLight;
+      c.lineWidth = 2.6;
+      c.lineCap = 'round';
+      c.beginPath();
+      c.arc(527, 46, 6, -0.7, 0.7);
+      c.stroke();
+      c.beginPath();
+      c.arc(527, 46, 11, -0.6, 0.6);
+      c.stroke();
+    }
     c.restore();
-  }
-
-  private drawHint(text: string): void {
-    if (!text) return;
-    this.c.save();
-    this.c.font = '700 22px "Nunito", Arial, sans-serif';
-    this.c.textAlign = 'center';
-    this.c.textBaseline = 'middle';
-    this.c.fillStyle = 'rgba(255,245,220,0.85)';
-    this.c.fillText(text, 288, 985);
-    this.c.restore();
   }
 
   private drawParticlesAndShake(): void {
@@ -1294,6 +1234,7 @@ export class Game {
         break;
       case 'intro':
         this.drawIntro();
+        if (this.stateT > 1.6) this.startLevel(this.level); // auto-advance, no words
         break;
       case 'reveal': {
         this.drawReveal();

@@ -1,8 +1,11 @@
 // ============================================================
-// NUMBER TEMPLE ESCAPE - Sprite Renderer
-// Canvas-drawn characters & props matching the video's look:
-// cube blocks with bevels, white cartoon eyes, explorer hats,
-// golden apples, cave temple environment, equation UI
+// NUMBER TEMPLE ESCAPE - Sprite Renderer v2
+// Canvas-drawn characters & props matching the source video:
+//  - glossy 3D cube blocks (Numberblocks look)
+//  - green 4 (2x2), pink 8 (2x4 + goggles + tentacles),
+//    orange 2 (1x2 + goggles), red 1 (1x1)
+//  - warm cave temple, golden seesaw/door, glowing apples,
+//    starburst equation cards, jungle finale
 // Design space: 576 x 1024 (portrait, same as source video)
 // ============================================================
 
@@ -10,31 +13,35 @@ export type Ctx = CanvasRenderingContext2D;
 
 // ---------- palette (sampled from the video) ----------
 export const PAL = {
-  bgDark: '#2e2413',        // letterbox / cave dark
-  caveWall: '#8a6a45',      // tan cave wall
-  caveWallDark: '#5e4526',  // lower cave shadow
-  caveFloor: '#a8845b',     // floor tan
-  green: '#63c231',
-  greenLight: '#8adb52',
-  greenDark: '#3f8f1d',
-  pink: '#cf3d95',
-  pinkLight: '#e665b4',
-  pinkDark: '#99266b',
-  tentacle: '#6d2f7a',
-  orange: '#e58a2e',
-  orangeLight: '#f2a950',
-  orangeDark: '#b25f17',
-  red: '#d8402c',
-  redLight: '#ea5f44',
-  redDark: '#9e2818',
-  gold: '#f5b52e',
+  bgDark: '#241a0e',
+  caveWall: '#8f7250',
+  caveWallDark: '#55401f',
+  caveFloor: '#c9a96e',
+  green: '#6ecb1c',
+  greenLight: '#a3e355',
+  greenDark: '#3f8a0c',
+  pink: '#e04f9f',
+  pinkLight: '#f487c3',
+  pinkDark: '#a82867',
+  tentacle: '#5c2330',
+  tentacleLight: '#8a4352',
+  orange: '#ef9a3a',
+  orangeLight: '#fbbe6e',
+  orangeDark: '#bd6c15',
+  red: '#e23b2e',
+  redLight: '#f26b54',
+  redDark: '#a02115',
+  gold: '#f2b93b',
   goldLight: '#ffd766',
-  goldDark: '#c17f13',
-  beam: '#f0b23c',
+  goldDark: '#b97c14',
+  beam: '#eeb038',
   white: '#ffffff',
   black: '#1a1a1a',
-  hatBrown: '#8a5a33',
-  hatDark: '#5f3c1e',
+  text: '#3d3d3d',
+  hatBrown: '#8b5e34',
+  hatDark: '#5e3c1e',
+  goggle: '#6b4a8c',
+  goggleDark: '#4a3060',
   boulder: '#9a7a52',
   boulderDark: '#6e5433',
   skyTop: '#bfeef2',
@@ -60,164 +67,261 @@ export function roundRect(c: Ctx, x: number, y: number, w: number, h: number, r:
   c.closePath();
 }
 
-// One beveled cube block (the signature look of every character)
+// One glossy 3D cube block (the signature Numberblocks look)
 export function drawCube(c: Ctx, x: number, y: number, s: number, base: string, light: string, dark: string, alpha = 1): void {
   c.save();
   c.globalAlpha = alpha;
-  const g = c.createLinearGradient(x, y, x + s, y + s);
+  const r = s * 0.2;
+  // drop shadow
+  c.fillStyle = 'rgba(0,0,0,0.28)';
+  roundRect(c, x + s * 0.05, y + s * 0.07, s, s, r);
+  c.filter = 'none';
+  c.fill();
+  // front face
+  const g = c.createLinearGradient(x, y, x + s * 0.9, y + s);
   g.addColorStop(0, light);
-  g.addColorStop(0.45, base);
+  g.addColorStop(0.4, base);
   g.addColorStop(1, dark);
   c.fillStyle = g;
-  roundRect(c, x, y, s, s, s * 0.16);
+  roundRect(c, x, y, s, s, r);
   c.fill();
-  c.strokeStyle = 'rgba(0,0,0,0.25)';
-  c.lineWidth = Math.max(1, s * 0.025);
-  c.stroke();
-  // top-left highlight edge
-  c.strokeStyle = 'rgba(255,255,255,0.45)';
-  c.lineWidth = Math.max(1, s * 0.035);
+  // top light face
+  const tg = c.createLinearGradient(x, y, x, y + s * 0.3);
+  tg.addColorStop(0, 'rgba(255,255,255,0.55)');
+  tg.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = tg;
+  roundRect(c, x + s * 0.06, y + s * 0.045, s * 0.88, s * 0.26, r * 0.7);
+  c.fill();
+  // right side shade
+  const sg = c.createLinearGradient(x + s * 0.7, y, x + s, y);
+  sg.addColorStop(0, 'rgba(0,0,0,0)');
+  sg.addColorStop(1, 'rgba(0,0,0,0.28)');
+  c.fillStyle = sg;
+  roundRect(c, x, y, s, s, r);
+  c.fill();
+  // bottom bounce light
+  const bg = c.createLinearGradient(x, y + s * 0.75, x, y + s);
+  bg.addColorStop(0, 'rgba(0,0,0,0)');
+  bg.addColorStop(1, 'rgba(0,0,0,0.22)');
+  c.fillStyle = bg;
+  roundRect(c, x, y, s, s, r);
+  c.fill();
+  // glossy specular dot
+  c.fillStyle = 'rgba(255,255,255,0.5)';
   c.beginPath();
-  c.moveTo(x + s * 0.14, y + s * 0.05);
-  c.lineTo(x + s * 0.86, y + s * 0.05);
+  c.ellipse(x + s * 0.3, y + s * 0.18, s * 0.1, s * 0.055, -0.5, 0, Math.PI * 2);
+  c.fill();
+  // crisp outline
+  c.strokeStyle = 'rgba(0,0,0,0.35)';
+  c.lineWidth = Math.max(1, s * 0.028);
+  roundRect(c, x, y, s, s, r);
   c.stroke();
   c.restore();
 }
 
-// White cartoon eye with pupil; dir = pupil offset
+// White cartoon eye with pupil; lookDir shifts the pupil
 export function drawEye(c: Ctx, x: number, y: number, r: number, px: number, py: number, lookDir = 0): void {
   c.save();
+  // eye white with thick outline
   c.fillStyle = PAL.white;
-  c.strokeStyle = PAL.black;
-  c.lineWidth = Math.max(1.5, r * 0.16);
+  c.strokeStyle = '#26160c';
+  c.lineWidth = Math.max(1.6, r * 0.18);
   c.beginPath();
-  c.ellipse(x, y, r, r * 1.12, 0, 0, Math.PI * 2);
+  c.ellipse(x, y, r, r * 1.15, 0, 0, Math.PI * 2);
   c.fill();
   c.stroke();
-  const dx = (px + lookDir) * r * 0.42;
-  const dy = py * r * 0.38;
-  c.fillStyle = PAL.black;
+  const dx = (px + lookDir) * r * 0.4;
+  const dy = py * r * 0.36;
+  c.fillStyle = '#131313';
   c.beginPath();
-  c.arc(x + dx, y + dy, r * 0.42, 0, Math.PI * 2);
+  c.arc(x + dx, y + dy, r * 0.44, 0, Math.PI * 2);
   c.fill();
-  c.fillStyle = 'rgba(255,255,255,0.85)';
+  c.fillStyle = 'rgba(255,255,255,0.9)';
   c.beginPath();
-  c.arc(x + dx - r * 0.14, y + dy - r * 0.16, r * 0.13, 0, Math.PI * 2);
+  c.arc(x + dx - r * 0.15, y + dy - r * 0.17, r * 0.14, 0, Math.PI * 2);
   c.fill();
+  // upper eyelid shading for depth
+  c.strokeStyle = 'rgba(0,0,0,0.12)';
+  c.lineWidth = r * 0.3;
+  c.beginPath();
+  c.arc(x, y, r * 0.82, Math.PI * 1.15, Math.PI * 1.85);
+  c.stroke();
   c.restore();
 }
 
 export function drawMouth(c: Ctx, x: number, y: number, w: number, kind: 'smile' | 'grit' | 'oh' | 'worried' = 'smile'): void {
   c.save();
-  c.strokeStyle = PAL.black;
-  c.lineWidth = Math.max(2, w * 0.14);
   c.lineCap = 'round';
   if (kind === 'smile') {
+    // open smile with teeth (like the show)
+    c.fillStyle = '#7c2d1e';
     c.beginPath();
-    c.arc(x, y - w * 0.18, w * 0.55, 0.15 * Math.PI, 0.85 * Math.PI);
+    c.moveTo(x - w * 0.5, y);
+    c.quadraticCurveTo(x, y + w * 0.75, x + w * 0.5, y);
+    c.quadraticCurveTo(x, y + w * 0.22, x - w * 0.5, y);
+    c.closePath();
+    c.fill();
+    c.fillStyle = PAL.white;
+    c.beginPath();
+    c.moveTo(x - w * 0.44, y - w * 0.02);
+    c.quadraticCurveTo(x, y + w * 0.22, x + w * 0.44, y - w * 0.02);
+    c.quadraticCurveTo(x, y + w * 0.3, x - w * 0.44, y - w * 0.02);
+    c.closePath();
+    c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.4)';
+    c.lineWidth = Math.max(1, w * 0.07);
+    c.beginPath();
+    c.moveTo(x - w * 0.5, y);
+    c.quadraticCurveTo(x, y + w * 0.75, x + w * 0.5, y);
     c.stroke();
   } else if (kind === 'grit') {
-    c.beginPath();
-    c.moveTo(x - w * 0.55, y);
-    c.lineTo(x + w * 0.55, y);
-    c.stroke();
-    c.beginPath();
-    for (let i = -1; i <= 1; i += 2) {
-      c.moveTo(x + i * w * 0.35, y - w * 0.12);
-      c.lineTo(x + i * w * 0.35, y + w * 0.12);
+    c.fillStyle = '#7c2d1e';
+    roundRect(c, x - w * 0.5, y - w * 0.16, w, w * 0.34, w * 0.14);
+    c.fill();
+    c.fillStyle = PAL.white;
+    roundRect(c, x - w * 0.42, y - w * 0.1, w * 0.84, w * 0.2, w * 0.08);
+    c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.35)';
+    c.lineWidth = Math.max(1, w * 0.05);
+    for (let i = 1; i < 3; i++) {
+      const tx = x - w * 0.42 + (w * 0.84 / 3) * i;
+      c.beginPath();
+      c.moveTo(tx, y - w * 0.1);
+      c.lineTo(tx, y + w * 0.1);
+      c.stroke();
     }
-    c.stroke();
   } else if (kind === 'oh') {
-    c.fillStyle = PAL.black;
+    c.fillStyle = '#7c2d1e';
     c.beginPath();
-    c.ellipse(x, y, w * 0.3, w * 0.4, 0, 0, Math.PI * 2);
+    c.ellipse(x, y + w * 0.1, w * 0.22, w * 0.3, 0, 0, Math.PI * 2);
     c.fill();
   } else {
-    // worried - downward arc
+    // worried: small wavy line
+    c.strokeStyle = '#26160c';
+    c.lineWidth = Math.max(2, w * 0.14);
     c.beginPath();
-    c.arc(x, y + w * 0.35, w * 0.5, 1.2 * Math.PI, 1.8 * Math.PI);
+    c.moveTo(x - w * 0.42, y + w * 0.08);
+    c.quadraticCurveTo(x - w * 0.2, y - w * 0.14, x, y + w * 0.08);
+    c.quadraticCurveTo(x + w * 0.2, y + w * 0.26, x + w * 0.42, y + w * 0.04);
     c.stroke();
   }
   c.restore();
 }
 
-// Brown explorer fedora (as worn by the 4s and 8 in the video)
+// explorer fedora hat (brown, curled brim) - big and proud, like the video
 export function drawHat(c: Ctx, cx: number, y: number, w: number): void {
   c.save();
-  // brim
-  c.fillStyle = PAL.hatDark;
-  c.beginPath();
-  c.ellipse(cx, y + w * 0.06, w * 0.62, w * 0.16, 0, 0, Math.PI * 2);
-  c.fill();
+  const brimW = w * 0.78;
+  const crownW = w * 0.5;
+  const crownH = w * 0.4;
+  const cy = y;
   // crown
-  const g = c.createLinearGradient(cx - w * 0.4, y - w * 0.5, cx + w * 0.4, y);
-  g.addColorStop(0, PAL.hatBrown);
-  g.addColorStop(1, PAL.hatDark);
-  c.fillStyle = g;
-  roundRect(c, cx - w * 0.42, y - w * 0.52, w * 0.84, w * 0.56, w * 0.18);
+  c.fillStyle = PAL.hatBrown;
+  roundRect(c, cx - crownW / 2, cy - crownH, crownW, crownH * 1.06, crownW * 0.3);
+  c.fill();
+  // crown top highlight
+  const hg = c.createLinearGradient(cx, cy - crownH, cx, cy - crownH * 0.3);
+  hg.addColorStop(0, 'rgba(255,235,200,0.55)');
+  hg.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = hg;
+  roundRect(c, cx - crownW / 2, cy - crownH, crownW, crownH * 0.6, crownW * 0.3);
   c.fill();
   // band
-  c.fillStyle = PAL.black;
-  roundRect(c, cx - w * 0.42, y - w * 0.14, w * 0.84, w * 0.14, w * 0.05);
+  c.fillStyle = PAL.hatDark;
+  c.fillRect(cx - crownW / 2, cy - crownH * 0.34, crownW, crownH * 0.2);
+  // brim (curled)
+  c.fillStyle = PAL.hatBrown;
+  c.beginPath();
+  c.ellipse(cx, cy, brimW / 2, w * 0.085, 0, 0, Math.PI * 2);
   c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.28)';
+  c.beginPath();
+  c.ellipse(cx, cy + w * 0.025, brimW / 2, w * 0.055, 0, 0, Math.PI);
+  c.fill();
+  // outline
+  c.strokeStyle = 'rgba(40,20,5,0.5)';
+  c.lineWidth = Math.max(1, w * 0.015);
+  c.beginPath();
+  c.ellipse(cx, cy, brimW / 2, w * 0.085, 0, 0, Math.PI * 2);
+  c.stroke();
   c.restore();
 }
 
-// Dark pill number badge above a character (matches video UI)
+// spy goggles (orange 2) - round purple lenses on a strap
+export function drawGoggles(c: Ctx, cx: number, y: number, w: number): void {
+  c.save();
+  // strap behind head
+  c.strokeStyle = PAL.goggleDark;
+  c.lineWidth = w * 0.1;
+  c.beginPath();
+  c.moveTo(cx - w * 0.5, y);
+  c.lineTo(cx + w * 0.5, y);
+  c.stroke();
+  for (const side of [-1, 1]) {
+    const lx = cx + side * w * 0.24;
+    c.fillStyle = PAL.goggle;
+    c.beginPath();
+    c.arc(lx, y, w * 0.19, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = 'rgba(255,255,255,0.35)';
+    c.beginPath();
+    c.arc(lx - w * 0.05, y - w * 0.05, w * 0.08, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = PAL.goggleDark;
+    c.lineWidth = Math.max(1.5, w * 0.045);
+    c.beginPath();
+    c.arc(lx, y, w * 0.19, 0, Math.PI * 2);
+    c.stroke();
+  }
+  // bridge
+  c.strokeStyle = PAL.goggleDark;
+  c.lineWidth = w * 0.05;
+  c.beginPath();
+  c.moveTo(cx - w * 0.05, y);
+  c.lineTo(cx + w * 0.05, y);
+  c.stroke();
+  c.restore();
+}
+
+// number label (like the show: simple bold digit with soft glow)
 export function drawBadge(c: Ctx, cx: number, cy: number, n: number, scale = 1): void {
   c.save();
-  const w = 46 * scale;
-  const h = 40 * scale;
-  c.fillStyle = 'rgba(30,26,20,0.92)';
-  roundRect(c, cx - w / 2, cy - h / 2, w, h, h * 0.42);
-  c.fill();
-  c.strokeStyle = 'rgba(255,255,255,0.25)';
-  c.lineWidth = 1.5;
-  c.stroke();
-  c.fillStyle = PAL.white;
-  c.font = `800 ${28 * scale}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  c.translate(cx, cy);
+  c.scale(scale, scale);
+  c.font = `800 44px ${eqFont}`;
   c.textAlign = 'center';
   c.textBaseline = 'middle';
-  c.fillText(String(n), cx, cy + 1 * scale);
+  c.shadowColor = 'rgba(255,250,230,0.85)';
+  c.shadowBlur = 10;
+  c.fillStyle = PAL.text;
+  c.fillText(String(n), 0, 0);
   c.restore();
 }
 
-// Golden apple (the "golden delicious" collectible)
+// glowing golden apple (sphere, no stem - like the video)
 export function drawApple(c: Ctx, x: number, y: number, r: number, glow = true, t = 0): void {
   c.save();
   if (glow) {
-    const pulse = 0.5 + 0.5 * Math.sin(t * 3 + x * 0.05);
-    const g = c.createRadialGradient(x, y, r * 0.3, x, y, r * 2.4);
-    g.addColorStop(0, `rgba(255,215,90,${0.5 + pulse * 0.2})`);
-    g.addColorStop(1, 'rgba(255,215,90,0)');
-    c.fillStyle = g;
+    const pulse = 0.75 + Math.sin(t) * 0.25;
+    const gg = c.createRadialGradient(x, y, r * 0.3, x, y, r * (2.1 + pulse * 0.4));
+    gg.addColorStop(0, 'rgba(255,214,90,0.5)');
+    gg.addColorStop(1, 'rgba(255,214,90,0)');
+    c.fillStyle = gg;
     c.beginPath();
-    c.arc(x, y, r * 2.4, 0, Math.PI * 2);
+    c.arc(x, y, r * (2.1 + pulse * 0.4), 0, Math.PI * 2);
     c.fill();
   }
-  // body
-  const bg = c.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.2, x, y, r * 1.2);
-  bg.addColorStop(0, PAL.goldLight);
-  bg.addColorStop(0.6, PAL.gold);
-  bg.addColorStop(1, PAL.goldDark);
-  c.fillStyle = bg;
+  const g = c.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.2);
+  g.addColorStop(0, '#ffe98a');
+  g.addColorStop(0.5, '#ffcf3e');
+  g.addColorStop(1, '#e09a1c');
+  c.fillStyle = g;
   c.beginPath();
-  // apple-ish shape: two lobes
-  c.arc(x - r * 0.18, y, r * 0.88, 0, Math.PI * 2);
-  c.arc(x + r * 0.18, y, r * 0.88, 0, Math.PI * 2);
+  c.arc(x, y, r, 0, Math.PI * 2);
   c.fill();
-  // stem + leaf
-  c.strokeStyle = PAL.hatDark;
-  c.lineWidth = Math.max(1.5, r * 0.16);
-  c.lineCap = 'round';
-  c.beginPath();
-  c.moveTo(x, y - r * 0.75);
-  c.quadraticCurveTo(x + r * 0.1, y - r * 1.05, x + r * 0.25, y - r * 1.1);
+  c.strokeStyle = 'rgba(120,70,10,0.4)';
+  c.lineWidth = Math.max(1, r * 0.08);
   c.stroke();
-  c.fillStyle = PAL.leaf;
-  c.beginPath();
-  c.ellipse(x + r * 0.5, y - r * 1.05, r * 0.3, r * 0.15, -0.5, 0, Math.PI * 2);
-  c.fill();
   c.restore();
 }
 
@@ -239,53 +343,123 @@ export interface BlockPose {
   time?: number;     // anim time for glows/wiggles
 }
 
-function drawLimbs(c: Ctx, color: string, dark: string, cx: number, bottomY: number, s: number, squash: number, armsUp: boolean, alpha: number): void {
+interface LimbOpts {
+  color: string;
+  dark: string;
+  handColor?: string;
+}
+
+function drawLimbs(c: Ctx, o: LimbOpts, cx: number, bottomY: number, s: number, squash: number, armsUp: boolean, alpha: number): void {
   c.save();
   c.globalAlpha = alpha;
-  c.strokeStyle = dark;
+  c.strokeStyle = o.dark;
   c.lineCap = 'round';
   // legs
-  c.lineWidth = s * 0.16;
-  const legLen = s * (0.3 - squash * 0.14);
+  c.lineWidth = s * 0.17;
+  const legLen = s * (0.34 - squash * 0.16);
   c.beginPath();
   c.moveTo(cx - s * 0.3, bottomY - legLen * 0.3);
-  c.lineTo(cx - s * 0.36, bottomY - legLen * 0.15 + legLen * 0.5);
+  c.lineTo(cx - s * 0.34, bottomY);
   c.stroke();
   c.beginPath();
   c.moveTo(cx + s * 0.3, bottomY - legLen * 0.3);
-  c.lineTo(cx + s * 0.36, bottomY - legLen * 0.15 + legLen * 0.5);
+  c.lineTo(cx + s * 0.34, bottomY);
   c.stroke();
   // feet
-  c.fillStyle = dark;
+  c.fillStyle = o.dark;
   c.beginPath();
-  c.ellipse(cx - s * 0.38, bottomY - legLen * 0.02, s * 0.14, s * 0.09, 0, 0, Math.PI * 2);
-  c.ellipse(cx + s * 0.38, bottomY - legLen * 0.02, s * 0.14, s * 0.09, 0, 0, Math.PI * 2);
+  c.ellipse(cx - s * 0.38, bottomY - s * 0.02, s * 0.15, s * 0.09, 0, 0, Math.PI * 2);
+  c.ellipse(cx + s * 0.38, bottomY - s * 0.02, s * 0.15, s * 0.09, 0, 0, Math.PI * 2);
   c.fill();
   // arms
-  c.lineWidth = s * 0.15;
+  c.lineWidth = s * 0.16;
+  c.strokeStyle = o.color;
+  const hand = o.handColor ?? o.dark;
   if (armsUp) {
     c.beginPath();
-    c.moveTo(cx - s * 0.5, bottomY - s * 0.55);
-    c.quadraticCurveTo(cx - s * 0.85, bottomY - s * 0.95, cx - s * 0.7, bottomY - s * 1.3);
-    c.stroke();
-    c.beginPath();
-    c.moveTo(cx + s * 0.5, bottomY - s * 0.55);
-    c.quadraticCurveTo(cx + s * 0.85, bottomY - s * 0.95, cx + s * 0.7, bottomY - s * 1.3);
-    c.stroke();
-  } else {
-    c.beginPath();
     c.moveTo(cx - s * 0.5, bottomY - s * 0.6);
-    c.quadraticCurveTo(cx - s * 0.8, bottomY - s * 0.45, cx - s * 0.75, bottomY - s * 0.2);
+    c.quadraticCurveTo(cx - s * 0.92, bottomY - s * 1.0, cx - s * 0.78, bottomY - s * 1.42);
     c.stroke();
     c.beginPath();
     c.moveTo(cx + s * 0.5, bottomY - s * 0.6);
-    c.quadraticCurveTo(cx + s * 0.8, bottomY - s * 0.45, cx + s * 0.75, bottomY - s * 0.2);
+    c.quadraticCurveTo(cx + s * 0.92, bottomY - s * 1.0, cx + s * 0.78, bottomY - s * 1.42);
     c.stroke();
+    c.fillStyle = hand;
+    c.beginPath();
+    c.arc(cx - s * 0.78, bottomY - s * 1.44, s * 0.13, 0, Math.PI * 2);
+    c.arc(cx + s * 0.78, bottomY - s * 1.44, s * 0.13, 0, Math.PI * 2);
+    c.fill();
+  } else {
+    c.beginPath();
+    c.moveTo(cx - s * 0.5, bottomY - s * 0.62);
+    c.quadraticCurveTo(cx - s * 0.84, bottomY - s * 0.5, cx - s * 0.8, bottomY - s * 0.24);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(cx + s * 0.5, bottomY - s * 0.62);
+    c.quadraticCurveTo(cx + s * 0.84, bottomY - s * 0.5, cx + s * 0.8, bottomY - s * 0.24);
+    c.stroke();
+    c.fillStyle = hand;
+    c.beginPath();
+    c.arc(cx - s * 0.8, bottomY - s * 0.22, s * 0.13, 0, Math.PI * 2);
+    c.arc(cx + s * 0.8, bottomY - s * 0.22, s * 0.13, 0, Math.PI * 2);
+    c.fill();
   }
   c.restore();
 }
 
-// GREEN 4 - a 2x2 block with explorer hat
+function face(c: Ctx, cx: number, fy: number, s: number, look: number, mouth: 'smile' | 'grit' | 'oh' | 'worried'): void {
+  const er = s * 0.2;
+  // eyebrows
+  c.save();
+  c.strokeStyle = '#26160c';
+  c.lineWidth = Math.max(2, s * 0.07);
+  c.lineCap = 'round';
+  c.beginPath();
+  c.moveTo(cx - er * 1.6, fy - er * 1.75);
+  c.quadraticCurveTo(cx - er * 0.9, fy - er * 2.15, cx - er * 0.2, fy - er * 1.7);
+  c.stroke();
+  c.beginPath();
+  c.moveTo(cx + er * 0.2, fy - er * 1.7);
+  c.quadraticCurveTo(cx + er * 0.9, fy - er * 2.15, cx + er * 1.6, fy - er * 1.75);
+  c.stroke();
+  c.restore();
+  drawEye(c, cx - s * 0.26, fy, er, -0.25, 0.25, look);
+  drawEye(c, cx + s * 0.26, fy, er, 0.25, 0.25, look);
+  drawMouth(c, cx, fy + s * 0.52, s * 0.42, mouth);
+}
+
+// one tapered tentacle with suction cups and optional orb at the tip
+function tentacle(c: Ctx, x0: number, y0: number, x1: number, y1: number, bendX: number, bendY: number, w: number, orb: boolean, t: number): void {
+  c.save();
+  c.strokeStyle = PAL.tentacle;
+  c.lineCap = 'round';
+  // draw as a filled tapered shape
+  const grad = c.createLinearGradient(x0, y0, x1, y1);
+  grad.addColorStop(0, PAL.tentacle);
+  grad.addColorStop(1, PAL.tentacleLight);
+  c.strokeStyle = grad;
+  c.lineWidth = w;
+  c.beginPath();
+  c.moveTo(x0, y0);
+  c.quadraticCurveTo(bendX, bendY, x1, y1);
+  c.stroke();
+  // suction cups along the inner curve
+  c.fillStyle = 'rgba(255,190,190,0.5)';
+  for (let i = 1; i <= 3; i++) {
+    const tt = i / 4;
+    const mx = (1 - tt) * (1 - tt) * x0 + 2 * (1 - tt) * tt * bendX + tt * tt * x1;
+    const my = (1 - tt) * (1 - tt) * y0 + 2 * (1 - tt) * tt * bendY + tt * tt * y1;
+    c.beginPath();
+    c.arc(mx, my, w * 0.16, 0, Math.PI * 2);
+    c.fill();
+  }
+  if (orb) {
+    drawApple(c, x1, y1, w * 0.5, true, t);
+  }
+  c.restore();
+}
+
+// GREEN 4 - 2x2 lime blocks, fedora, expressive face
 export function drawGreen4(c: Ctx, p: BlockPose): void {
   const s = 62 * p.scale;
   const squash = p.squash ?? 0;
@@ -297,110 +471,85 @@ export function drawGreen4(c: Ctx, p: BlockPose): void {
     c.rotate(p.tilt);
     c.translate(-p.cx, -p.bottomY);
   }
-  drawLimbs(c, PAL.green, PAL.greenDark, p.cx, p.bottomY, s, squash, p.armsUp ?? false, alpha);
+  drawLimbs(c, { color: PAL.greenDark, dark: PAL.greenDark, handColor: PAL.greenDark }, p.cx, p.bottomY, s, squash, p.armsUp ?? false, alpha);
   for (let r = 0; r < 2; r++)
     for (let col = 0; col < 2; col++)
       drawCube(c, p.cx - s + col * s, topY + r * s, s, PAL.green, PAL.greenLight, PAL.greenDark, alpha);
   // face on upper row
-  const fy = topY + s * 0.62;
-  drawEye(c, p.cx - s * 0.32, fy, s * 0.19, -0.2, 0.2, p.look);
-  drawEye(c, p.cx + s * 0.32, fy, s * 0.19, 0.2, 0.2, p.look);
-  drawMouth(c, p.cx, fy + s * 0.5, s * 0.4, p.mouth ?? 'smile');
+  face(c, p.cx, topY + s * 0.58, s, p.look, p.mouth ?? 'smile');
   // hat
   drawHat(c, p.cx, topY + s * 0.02, s * 1.5);
-  // apples held
+  // glowing orbs held in hands
   if (p.apples && p.apples > 0) {
     const n = Math.min(p.apples, 8);
     for (let i = 0; i < n; i++) {
       const side = i % 2 === 0 ? -1 : 1;
       const row = Math.floor(i / 2);
-      drawApple(c, p.cx + side * s * 0.95, p.bottomY - s * 1.1 - row * s * 0.5, s * 0.2, true, p.time ?? 0);
+      drawApple(c, p.cx + side * s * 0.95, p.bottomY - s * 1.05 - row * s * 0.45, s * 0.19, true, (p.time ?? 0) * 3 + i);
     }
   }
   c.restore();
 }
 
-// PINK 8 - a 2x4 tower with tentacle arms & hat (like the video)
+// PINK 8 (Octoblock) - 2x4 magenta blocks, fedora + goggles, 8 tentacles
 export function drawPink8(c: Ctx, p: BlockPose): void {
   const s = 56 * p.scale;
   const squash = p.squash ?? 0;
   const topY = p.bottomY - s * 4 * (1 - squash * 0.15);
   const alpha = p.alpha ?? 1;
+  const t = p.time ?? 0;
   c.save();
   if (p.tilt) {
     c.translate(p.cx, p.bottomY);
     c.rotate(p.tilt);
     c.translate(-p.cx, -p.bottomY);
   }
-  // tentacle arms (4 visible, wavy)
+  // legs
   c.save();
   c.globalAlpha = alpha;
-  c.strokeStyle = PAL.tentacle;
-  c.lineWidth = s * 0.26;
-  c.lineCap = 'round';
-  const t = p.time ?? 0; // wiggle time
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 2; i++) {
-      const baseY = p.bottomY - s * (1.4 + i * 0.8);
-      const wig = Math.sin(t * 4 + i * 2 + (side > 0 ? 1 : 0)) * s * 0.12;
-      c.beginPath();
-      c.moveTo(p.cx + side * s * 0.9, baseY);
-      c.quadraticCurveTo(
-        p.cx + side * s * (1.5 + i * 0.1) + wig, baseY - s * 0.4,
-        p.cx + side * s * (1.15 + i * 0.25) + wig * 1.5, baseY - s * 0.95
-      );
-      c.stroke();
-    }
-  }
-  // legs
+  c.strokeStyle = PAL.pinkDark;
   c.lineWidth = s * 0.3;
+  c.lineCap = 'round';
   c.beginPath();
-  c.moveTo(p.cx - s * 0.35, p.bottomY - s * 0.3);
-  c.lineTo(p.cx - s * 0.45, p.bottomY);
-  c.stroke();
-  c.beginPath();
-  c.moveTo(p.cx + s * 0.35, p.bottomY - s * 0.3);
-  c.lineTo(p.cx + s * 0.45, p.bottomY);
+  c.moveTo(p.cx - s * 0.32, p.bottomY - s * 0.2);
+  c.lineTo(p.cx - s * 0.36, p.bottomY);
+  c.moveTo(p.cx + s * 0.32, p.bottomY - s * 0.2);
+  c.lineTo(p.cx + s * 0.36, p.bottomY);
   c.stroke();
   c.restore();
-  // 8 blocks: 2 wide, 4 tall
+  // 8 tentacles from every row (4 per side), wiggle with time
+  const rows = [1.0, 1.85, 2.7, 3.55];
+  for (const side of [-1, 1]) {
+    rows.forEach((ry, i) => {
+      const baseY = p.bottomY - s * ry;
+      const wig = Math.sin(t * 3.4 + i * 1.7 + (side > 0 ? 0.9 : 0)) * s * 0.14;
+      const orb = (p.apples ?? 0) > i;
+      tentacle(
+        c,
+        p.cx + side * s * 0.92, baseY,
+        p.cx + side * s * (1.5 + i * 0.14) + wig, baseY - s * (0.62 - i * 0.1),
+        p.cx + side * s * (1.42 + i * 0.1) + wig, baseY + s * 0.1,
+        s * (0.24 - i * 0.02), orb, t * 3 + i
+      );
+    });
+  }
+  // body blocks: 2 wide x 4 tall
   for (let r = 0; r < 4; r++)
     for (let col = 0; col < 2; col++)
       drawCube(c, p.cx - s + col * s, topY + r * s, s, PAL.pink, PAL.pinkLight, PAL.pinkDark, alpha);
-  // face on 2nd row from top
-  const fy = topY + s * 1.55;
-  // lashes
+  // face on top block + goggles + hat
+  const fy = topY + s * 0.52;
   c.save();
   c.globalAlpha = alpha;
-  c.strokeStyle = PAL.black;
-  c.lineWidth = s * 0.05;
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 3; i++) {
-      const ex = p.cx + side * s * 0.42;
-      const ey = fy - s * 0.28 - i * s * 0.1;
-      c.beginPath();
-      c.moveTo(ex, ey);
-      c.lineTo(ex + side * s * 0.16, ey - s * 0.08);
-      c.stroke();
-    }
-  }
-  drawEye(c, p.cx - s * 0.3, fy, s * 0.2, -0.2, 0.2, p.look);
-  drawEye(c, p.cx + s * 0.3, fy, s * 0.2, 0.2, 0.2, p.look);
-  drawMouth(c, p.cx, fy + s * 0.52, s * 0.42, p.mouth ?? 'smile');
-  drawHat(c, p.cx, topY + s * 0.05, s * 1.35);
-  // apples held with tentacles
-  if (p.apples && p.apples > 0 && p.apples < 50) {
-    const n = Math.min(p.apples, 8);
-    for (let i = 0; i < n; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      const row = Math.floor(i / 2);
-      drawApple(c, p.cx + side * s * 1.25, p.bottomY - s * (1.5 + row * 0.75), s * 0.24, true, (p.time ?? 0) + i);
-    }
-  }
+  // goggles sit above the eyes
+  drawGoggles(c, p.cx, fy - s * 0.32, s * 1.5);
+  face(c, p.cx, fy + s * 0.28, s * 0.94, p.look, p.mouth ?? 'smile');
+  drawHat(c, p.cx, topY + s * 0.02, s * 1.4);
+  c.restore();
   c.restore();
 }
 
-// ORANGE 2 - a 1x2 block with big eyes
+// ORANGE 2 - 1x2, fedora + spy goggles
 export function drawOrange2(c: Ctx, p: BlockPose): void {
   const s = 60 * p.scale;
   const squash = p.squash ?? 0;
@@ -412,23 +561,29 @@ export function drawOrange2(c: Ctx, p: BlockPose): void {
     c.rotate(p.tilt);
     c.translate(-p.cx, -p.bottomY);
   }
-  drawLimbs(c, PAL.orange, PAL.orangeDark, p.cx, p.bottomY, s, squash, p.armsUp ?? false, alpha);
-  drawCube(c, p.cx - s * 0.5, topY, s, PAL.orange, PAL.orangeLight, PAL.orangeDark, alpha);
-  drawCube(c, p.cx - s * 0.5, topY + s, s, PAL.orange, PAL.orangeLight, PAL.orangeDark, alpha);
-  const fy = topY + s * 0.6;
-  drawEye(c, p.cx - s * 0.24, fy, s * 0.22, -0.2, 0.2, p.look);
-  drawEye(c, p.cx + s * 0.24, fy, s * 0.22, 0.2, 0.2, p.look);
-  drawMouth(c, p.cx, fy + s * 0.55, s * 0.38, p.mouth ?? 'smile');
+  drawLimbs(c, { color: PAL.orangeDark, dark: PAL.orangeDark, handColor: PAL.orangeDark }, p.cx, p.bottomY, s, squash, p.armsUp ?? false, alpha);
+  for (let r = 0; r < 2; r++)
+    drawCube(c, p.cx - s * 0.5, topY + r * s, s, PAL.orange, PAL.orangeLight, PAL.orangeDark, alpha);
+  const fy = topY + s * 0.52;
+  c.save();
+  c.globalAlpha = alpha;
+  drawGoggles(c, p.cx, fy - s * 0.38, s * 1.1);
+  face(c, p.cx, fy + s * 0.3, s * 0.9, p.look, p.mouth ?? 'smile');
+  drawHat(c, p.cx, topY + s * 0.02, s * 1.35);
+  c.restore();
   if (p.apples && p.apples > 0) {
-    drawApple(c, p.cx - s * 0.75, p.bottomY - s * 1.0, s * 0.22, true, p.time ?? 0);
-    drawApple(c, p.cx + s * 0.75, p.bottomY - s * 1.0, s * 0.22, true, (p.time ?? 0) + 1);
+    const n = Math.min(p.apples, 4);
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      drawApple(c, p.cx + side * s * 0.85, p.bottomY - s * 0.95, s * 0.18, true, (p.time ?? 0) * 3 + i);
+    }
   }
   c.restore();
 }
 
-// RED 1 - a single block with one big eye
+// RED 1 - single red block, tiny fedora, one big eye
 export function drawRed1(c: Ctx, p: BlockPose): void {
-  const s = 52 * p.scale;
+  const s = 58 * p.scale;
   const squash = p.squash ?? 0;
   const topY = p.bottomY - s * (1 - squash * 0.2);
   const alpha = p.alpha ?? 1;
@@ -438,12 +593,18 @@ export function drawRed1(c: Ctx, p: BlockPose): void {
     c.rotate(p.tilt);
     c.translate(-p.cx, -p.bottomY);
   }
-  drawLimbs(c, PAL.red, PAL.redDark, p.cx, p.bottomY, s, squash, p.armsUp ?? false, alpha);
+  drawLimbs(c, { color: PAL.redDark, dark: PAL.redDark, handColor: PAL.redDark }, p.cx, p.bottomY, s, squash, p.armsUp ?? false, alpha);
   drawCube(c, p.cx - s * 0.5, topY, s, PAL.red, PAL.redLight, PAL.redDark, alpha);
-  drawEye(c, p.cx, topY + s * 0.5, s * 0.26, -0.2, 0.2, p.look);
-  drawMouth(c, p.cx, topY + s * 0.8, s * 0.3, p.mouth ?? 'smile');
+  const fy = topY + s * 0.52;
+  c.save();
+  c.globalAlpha = alpha;
+  // single big eye (Numberblock One)
+  drawEye(c, p.cx, fy - s * 0.02, s * 0.24, 0.2, 0.3, p.look);
+  drawMouth(c, p.cx, fy + s * 0.5, s * 0.4, p.mouth ?? 'smile');
+  drawHat(c, p.cx, topY + s * 0.02, s * 1.3);
+  c.restore();
   if (p.apples && p.apples > 0) {
-    drawApple(c, p.cx - s * 0.8, p.bottomY - s * 0.9, s * 0.2, true, p.time ?? 0);
+    drawApple(c, p.cx + s * 0.85, p.bottomY - s * 0.6, s * 0.18, true, (p.time ?? 0) * 3);
   }
   c.restore();
 }
@@ -452,600 +613,794 @@ export function drawRed1(c: Ctx, p: BlockPose): void {
 // ENVIRONMENT
 // ============================================================
 
+function vignette(c: Ctx, strength = 0.45): void {
+  const g = c.createRadialGradient(W2, H2, H2 * 0.35, W2, H2, H2 * 1.05);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, `rgba(10,6,2,${strength})`);
+  c.fillStyle = g;
+  c.fillRect(0, 0, 576, 1024);
+}
+
+const W2 = 288;
+const H2 = 512;
+
+// warm brown cave wall with stalactites, rock texture & vignette
 export function drawCaveBackground(c: Ctx, t: number, hue: 'brown' | 'dark' = 'brown'): void {
-  // wall gradient
+  c.save();
   const g = c.createLinearGradient(0, 0, 0, 1024);
   if (hue === 'brown') {
-    g.addColorStop(0, '#3a2c18');
-    g.addColorStop(0.35, PAL.caveWallDark);
-    g.addColorStop(0.75, PAL.caveWall);
-    g.addColorStop(1, '#3a2c18');
+    g.addColorStop(0, '#a3845a');
+    g.addColorStop(0.45, '#84683f');
+    g.addColorStop(1, '#4a3418');
   } else {
-    g.addColorStop(0, '#241c10');
-    g.addColorStop(0.5, '#4a3820');
-    g.addColorStop(1, '#241c10');
+    g.addColorStop(0, '#6b543a');
+    g.addColorStop(0.45, '#4c3a1e');
+    g.addColorStop(1, '#241608');
   }
   c.fillStyle = g;
   c.fillRect(0, 0, 576, 1024);
-  // speckle texture (deterministic)
-  c.save();
-  let seed = 7;
-  const rnd = (): number => {
-    seed = (seed * 16807) % 2147483647;
-    return seed / 2147483647;
-  };
-  for (let i = 0; i < 90; i++) {
-    const x = rnd() * 576;
-    const y = rnd() * 1024;
-    const r = 2 + rnd() * 10;
-    c.fillStyle = rnd() > 0.5 ? 'rgba(0,0,0,0.10)' : 'rgba(255,230,180,0.07)';
+  // large soft rock blobs
+  for (let i = 0; i < 14; i++) {
+    const bx = ((i * 173) % 640) - 30;
+    const by = 60 + ((i * 271) % 900);
+    const br = 60 + ((i * 97) % 90);
+    c.fillStyle = i % 3 === 0 ? 'rgba(255,230,190,0.05)' : 'rgba(30,18,6,0.09)';
     c.beginPath();
-    c.arc(x, y, r, 0, Math.PI * 2);
+    c.ellipse(bx + Math.sin(t * 0.3 + i) * 3, by, br, br * 0.72, i, 0, Math.PI * 2);
     c.fill();
   }
+  // stalactites along the top
+  c.fillStyle = 'rgba(28,16,6,0.8)';
+  for (let i = 0; i < 9; i++) {
+    const sx = 24 + i * 66 + Math.sin(i * 5.1) * 12;
+    const sw = 26 + (i % 3) * 14;
+    const sh = 46 + ((i * 53) % 70);
+    c.beginPath();
+    c.moveTo(sx - sw / 2, 0);
+    c.quadraticCurveTo(sx - sw * 0.16, sh * 0.75, sx, sh);
+    c.quadraticCurveTo(sx + sw * 0.16, sh * 0.75, sx + sw / 2, 0);
+    c.closePath();
+    c.fill();
+  }
+  // dim distant archways (depth cue)
+  if (hue === 'brown') {
+    c.fillStyle = 'rgba(30,18,8,0.28)';
+    for (const ax of [70, 288, 505]) {
+      c.beginPath();
+      c.moveTo(ax - 34, 380);
+      c.lineTo(ax - 34, 470);
+      c.quadraticCurveTo(ax, 408, ax + 34, 470);
+      c.lineTo(ax + 34, 380);
+      c.closePath();
+      c.fill();
+    }
+  }
+  vignette(c, hue === 'brown' ? 0.4 : 0.62);
   c.restore();
-  // top opening glow (like the video's lit top area)
-  const glow = c.createRadialGradient(288, 60, 20, 288, 60, 380);
-  glow.addColorStop(0, 'rgba(255,230,170,0.28)');
-  glow.addColorStop(1, 'rgba(255,230,170,0)');
-  c.fillStyle = glow;
-  c.fillRect(0, 0, 576, 500);
 }
 
+// warm spotlight cone from the ceiling
 export function drawSpotlight(c: Ctx, cx: number, topY: number, spread: number, bottomY: number, intensity = 0.25): void {
   c.save();
-  c.globalCompositeOperation = 'lighter';
-  const g = c.createLinearGradient(0, topY, 0, bottomY);
-  g.addColorStop(0, `rgba(255,235,180,${intensity})`);
-  g.addColorStop(1, 'rgba(255,235,180,0)');
+  const g = c.createLinearGradient(cx, topY, cx, bottomY);
+  g.addColorStop(0, `rgba(255,240,200,${intensity})`);
+  g.addColorStop(1, 'rgba(255,240,200,0)');
   c.fillStyle = g;
   c.beginPath();
-  c.moveTo(cx - 14, topY);
-  c.lineTo(cx + 14, topY);
+  c.moveTo(cx - spread * 0.18, topY);
+  c.lineTo(cx + spread * 0.18, topY);
   c.lineTo(cx + spread, bottomY);
   c.lineTo(cx - spread, bottomY);
   c.closePath();
   c.fill();
+  // soft pool of light where the cone lands
+  const pg = c.createRadialGradient(cx, bottomY - 40, 10, cx, bottomY - 40, spread * 0.9);
+  pg.addColorStop(0, `rgba(255,235,180,${intensity * 0.5})`);
+  pg.addColorStop(1, 'rgba(255,235,180,0)');
+  c.fillStyle = pg;
+  c.beginPath();
+  c.ellipse(cx, bottomY - 40, spread * 0.9, spread * 0.4, 0, 0, Math.PI * 2);
+  c.fill();
   c.restore();
 }
 
-// Golden door frame with the eye glyph (background prop)
+// golden temple door with a radiant halo
 export function drawGoldenDoor(c: Ctx, cx: number, baseY: number, w: number, h: number, eyeOpen = 1): void {
   c.save();
-  // arch
-  c.fillStyle = PAL.goldDark;
-  roundRect(c, cx - w / 2, baseY - h, w, h, w * 0.28);
-  c.fill();
-  c.fillStyle = 'rgba(20,14,6,0.85)';
-  roundRect(c, cx - w / 2 + w * 0.14, baseY - h + h * 0.12, w * 0.72, h * 0.88, w * 0.22);
-  c.fill();
-  // eye glyph on top
-  const gy = baseY - h + h * 0.3;
-  c.fillStyle = PAL.gold;
+  const pulse = 0.6 + eyeOpen * 0.4;
+  // halo
+  const hg = c.createRadialGradient(cx, baseY - h * 0.5, w * 0.2, cx, baseY - h * 0.5, w * (1.6 + pulse * 0.5));
+  hg.addColorStop(0, `rgba(255,215,110,${0.55 * pulse})`);
+  hg.addColorStop(1, 'rgba(255,215,110,0)');
+  c.fillStyle = hg;
   c.beginPath();
-  c.ellipse(cx, gy, w * 0.16, w * 0.09 * eyeOpen, 0, 0, Math.PI * 2);
+  c.arc(cx, baseY - h * 0.5, w * (1.6 + pulse * 0.5), 0, Math.PI * 2);
   c.fill();
-  if (eyeOpen > 0.15) {
-    c.fillStyle = '#241a10';
-    c.beginPath();
-    c.arc(cx, gy, w * 0.06 * eyeOpen, 0, Math.PI * 2);
-    c.fill();
-  }
+  // frame
+  c.fillStyle = '#7a5420';
+  roundRect(c, cx - w * 0.62, baseY - h * 1.06, w * 1.24, h * 1.06, w * 0.2);
+  c.fill();
+  // door slab with arch top
+  const dg = c.createLinearGradient(cx - w / 2, baseY - h, cx + w / 2, baseY);
+  dg.addColorStop(0, '#ffd766');
+  dg.addColorStop(0.5, '#f2b93b');
+  dg.addColorStop(1, '#c98a1e');
+  c.fillStyle = dg;
+  c.beginPath();
+  c.moveTo(cx - w * 0.5, baseY);
+  c.lineTo(cx - w * 0.5, baseY - h * 0.62);
+  c.quadraticCurveTo(cx, baseY - h * 1.06, cx + w * 0.5, baseY - h * 0.62);
+  c.lineTo(cx + w * 0.5, baseY);
+  c.closePath();
+  c.fill();
+  // inner panel
+  c.strokeStyle = 'rgba(120,75,10,0.6)';
+  c.lineWidth = w * 0.05;
+  c.beginPath();
+  c.moveTo(cx - w * 0.3, baseY - h * 0.1);
+  c.lineTo(cx - w * 0.3, baseY - h * 0.55);
+  c.quadraticCurveTo(cx, baseY - h * 0.82, cx + w * 0.3, baseY - h * 0.55);
+  c.lineTo(cx + w * 0.3, baseY - h * 0.1);
+  c.stroke();
+  // glowing core (the door radiates light in the video)
+  const cg = c.createRadialGradient(cx, baseY - h * 0.45, 2, cx, baseY - h * 0.45, w * 0.5);
+  cg.addColorStop(0, `rgba(255,246,200,${0.85 * pulse})`);
+  cg.addColorStop(1, 'rgba(255,246,200,0)');
+  c.fillStyle = cg;
+  c.beginPath();
+  c.arc(cx, baseY - h * 0.45, w * 0.5, 0, Math.PI * 2);
+  c.fill();
   c.restore();
 }
 
-// Wooden plank platform
+// golden wooden planks (floors & platforms)
 export function drawPlanks(c: Ctx, x: number, y: number, w: number, h: number): void {
   c.save();
-  const g = c.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, '#f0b34c');
-  g.addColorStop(0.5, '#d99a33');
-  g.addColorStop(1, '#b87c22');
+  const g = c.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, '#f4c356');
+  g.addColorStop(0.5, '#df9f33');
+  g.addColorStop(1, '#a86f18');
   c.fillStyle = g;
-  roundRect(c, x, y, w, h, 6);
+  roundRect(c, x, y, w, h, Math.min(8, h * 0.4));
   c.fill();
-  c.strokeStyle = 'rgba(120,70,10,0.5)';
+  // plank seams + grain
+  c.strokeStyle = 'rgba(110,70,10,0.5)';
   c.lineWidth = 2;
-  const n = Math.max(2, Math.floor(w / 90));
-  for (let i = 1; i < n; i++) {
-    const px = x + (w / n) * i;
+  const pw = 118;
+  for (let px = x + pw; px < x + w; px += pw) {
     c.beginPath();
-    c.moveTo(px, y);
-    c.lineTo(px, y + h);
+    c.moveTo(px, y + 2);
+    c.lineTo(px, y + h - 2);
     c.stroke();
   }
+  c.strokeStyle = 'rgba(255,230,160,0.5)';
+  c.lineWidth = 1.6;
+  for (let px = x + 10; px < x + w; px += 34) {
+    c.beginPath();
+    c.moveTo(px, y + h * 0.3);
+    c.quadraticCurveTo(px + 14, y + h * 0.42, px, y + h * 0.55);
+    c.stroke();
+  }
+  c.strokeStyle = 'rgba(70,40,4,0.45)';
+  c.lineWidth = 2.5;
+  roundRect(c, x, y, w, h, Math.min(8, h * 0.4));
+  c.stroke();
   c.restore();
 }
 
-// Red ball pit (danger)
+// pit full of dark red glossy balls
 export function drawBallPit(c: Ctx, y: number, h: number, t: number): void {
   c.save();
-  c.fillStyle = '#3a2410';
+  // pit shadow
+  const g = c.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, '#1a0e06');
+  g.addColorStop(1, '#0c0603');
+  c.fillStyle = g;
   c.fillRect(0, y, 576, h);
-  let seed = 3;
-  const rnd = (): number => {
-    seed = (seed * 48271) % 2147483647;
-    return seed / 2147483647;
-  };
-  for (let i = 0; i < 70; i++) {
-    const x = rnd() * 576;
-    const yy = y + 10 + rnd() * (h - 26);
-    const r = 9 + rnd() * 12;
-    const bob = Math.sin(t * 2 + i) * 2;
-    const bg = c.createRadialGradient(x - r * 0.3, yy - r * 0.3 - bob, r * 0.2, x, yy - bob, r);
-    bg.addColorStop(0, '#ff6b52');
-    bg.addColorStop(1, '#8e1d10');
-    c.fillStyle = bg;
-    c.beginPath();
-    c.arc(x, yy - bob, r, 0, Math.PI * 2);
-    c.fill();
+  // balls (2.5 rows, wobbles gently)
+  const r = 17;
+  for (let row = 0; row < 4; row++) {
+    for (let col = -1; col < 16; col++) {
+      const bx = col * 36 + (row % 2) * 18 + 6;
+      const by = y + 10 + row * 30 + Math.sin(t * 1.4 + col * 0.8 + row) * 3;
+      const bg = c.createRadialGradient(bx - r * 0.3, by - r * 0.35, r * 0.15, bx, by, r);
+      bg.addColorStop(0, '#e05a48');
+      bg.addColorStop(0.6, '#b03328');
+      bg.addColorStop(1, '#6e1d15');
+      c.fillStyle = bg;
+      c.beginPath();
+      c.arc(bx, by, r, 0, Math.PI * 2);
+      c.fill();
+    }
   }
   c.restore();
 }
 
-// Golden balance beam (seesaw)
+// golden seesaw on an earthen mound ring
 export function drawSeesaw(c: Ctx, cx: number, y: number, halfW: number, angle: number): void {
+  c.save();
+  // mound platform
+  c.fillStyle = '#9a7a50';
+  c.beginPath();
+  c.ellipse(cx, y + 34, halfW * 1.25, 52, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.22)';
+  c.beginPath();
+  c.ellipse(cx, y + 40, halfW * 1.2, 44, 0, 0, Math.PI * 2);
+  c.fill();
+  // fulcrum
+  c.fillStyle = '#8a6a3c';
+  c.beginPath();
+  c.moveTo(cx - 26, y + 26);
+  c.lineTo(cx + 26, y + 26);
+  c.lineTo(cx, y - 16);
+  c.closePath();
+  c.fill();
+  c.strokeStyle = 'rgba(60,36,8,0.6)';
+  c.lineWidth = 3;
+  c.stroke();
+  // plank
   c.save();
   c.translate(cx, y);
   c.rotate(angle);
-  const g = c.createLinearGradient(0, -10, 0, 14);
-  g.addColorStop(0, PAL.goldLight);
-  g.addColorStop(0.5, PAL.beam);
-  g.addColorStop(1, PAL.goldDark);
+  const g = c.createLinearGradient(0, -8, 0, 10);
+  g.addColorStop(0, '#ffd76e');
+  g.addColorStop(0.5, '#eeb038');
+  g.addColorStop(1, '#b97c14');
   c.fillStyle = g;
   roundRect(c, -halfW, -9, halfW * 2, 18, 9);
   c.fill();
-  c.strokeStyle = 'rgba(120,70,10,0.55)';
-  c.lineWidth = 2;
+  c.strokeStyle = 'rgba(90,55,8,0.55)';
+  c.lineWidth = 3;
+  roundRect(c, -halfW, -9, halfW * 2, 18, 9);
   c.stroke();
+  // grip marks
+  c.strokeStyle = 'rgba(120,75,12,0.5)';
+  c.lineWidth = 2;
+  for (let i = -2; i <= 2; i++) {
+    if (i === 0) continue;
+    c.beginPath();
+    c.moveTo(i * halfW * 0.36, -4);
+    c.lineTo(i * halfW * 0.36 + 12, -4);
+    c.stroke();
+  }
   c.restore();
-  // fulcrum pole
-  c.save();
-  const pg = c.createLinearGradient(cx - 5, 0, cx + 5, 0);
-  pg.addColorStop(0, PAL.goldDark);
-  pg.addColorStop(0.5, PAL.goldLight);
-  pg.addColorStop(1, PAL.goldDark);
-  c.fillStyle = pg;
-  c.fillRect(cx - 5, y - 190, 10, 190);
   c.restore();
 }
 
-// Giant boulder
+// giant rolling boulder
 export function drawBoulder(c: Ctx, x: number, y: number, r: number, rot: number): void {
   c.save();
   c.translate(x, y);
   c.rotate(rot);
-  const g = c.createRadialGradient(-r * 0.35, -r * 0.35, r * 0.2, 0, 0, r * 1.15);
-  g.addColorStop(0, '#b09060');
-  g.addColorStop(0.7, PAL.boulder);
-  g.addColorStop(1, PAL.boulderDark);
+  const g = c.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.15, 0, 0, r * 1.15);
+  g.addColorStop(0, '#c4a26e');
+  g.addColorStop(0.65, '#9a7a52');
+  g.addColorStop(1, '#5e4426');
   c.fillStyle = g;
   c.beginPath();
-  // lumpy circle
-  const pts = 11;
-  for (let i = 0; i <= pts; i++) {
-    const a = (i / pts) * Math.PI * 2;
-    const rr = r * (0.9 + 0.14 * Math.sin(i * 2.7));
-    const px = Math.cos(a) * rr;
-    const py = Math.sin(a) * rr;
-    if (i === 0) c.moveTo(px, py);
-    else c.lineTo(px, py);
+  c.arc(0, 0, r, 0, Math.PI * 2);
+  c.fill();
+  // cracks & speckles (scattered, not face-like)
+  c.strokeStyle = 'rgba(50,32,12,0.5)';
+  c.lineWidth = r * 0.055;
+  c.lineCap = 'round';
+  c.beginPath();
+  c.moveTo(-r * 0.55, -r * 0.35);
+  c.quadraticCurveTo(-r * 0.3, -r * 0.3, -r * 0.18, -r * 0.48);
+  c.stroke();
+  c.beginPath();
+  c.moveTo(r * 0.15, r * 0.55);
+  c.quadraticCurveTo(r * 0.35, r * 0.35, r * 0.55, r * 0.42);
+  c.stroke();
+  c.beginPath();
+  c.moveTo(-r * 0.6, r * 0.15);
+  c.quadraticCurveTo(-r * 0.42, r * 0.28, -r * 0.5, r * 0.45);
+  c.stroke();
+  c.fillStyle = 'rgba(50,32,12,0.35)';
+  for (const [sx, sy, sr] of [[-0.35, -0.15, 0.11], [0.3, -0.25, 0.09], [0.05, 0.15, 0.08], [-0.1, 0.45, 0.07], [0.5, 0.05, 0.09]]) {
+    c.beginPath();
+    c.arc(sx * r, sy * r, sr * r, 0, Math.PI * 2);
+    c.fill();
   }
-  c.closePath();
-  c.fill();
-  c.fillStyle = 'rgba(0,0,0,0.18)';
+  c.restore();
+  // ground shadow
+  c.save();
+  c.fillStyle = 'rgba(0,0,0,0.3)';
   c.beginPath();
-  c.ellipse(-r * 0.25, r * 0.3, r * 0.35, r * 0.18, 0.4, 0, Math.PI * 2);
-  c.fill();
-  c.beginPath();
-  c.ellipse(r * 0.3, -r * 0.2, r * 0.22, r * 0.12, -0.3, 0, Math.PI * 2);
+  c.ellipse(x, y + r * 0.92, r * 0.9, r * 0.2, 0, 0, Math.PI * 2);
   c.fill();
   c.restore();
 }
 
-// Stone bridge segment (level 3)
+// golden bridge over a chasm
 export function drawBridge(c: Ctx, x: number, y: number, w: number, h: number): void {
-  c.save();
-  const g = c.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, '#c9a25e');
-  g.addColorStop(1, '#8a6a3a');
-  c.fillStyle = g;
-  c.fillRect(x, y, w, h);
-  c.strokeStyle = 'rgba(60,40,15,0.5)';
-  c.lineWidth = 2;
-  for (let i = 0; i < Math.floor(w / 42); i++) {
-    const bx = x + 6 + i * 42;
-    c.strokeRect(bx, y + 3, 36, h * 0.4);
-    c.strokeRect(bx - 21, y + h * 0.55, 36, h * 0.4);
-  }
-  c.restore();
-}
-
-// Tunnel / arch obstacle (level 4)
-export function drawTunnelArch(c: Ctx, x: number, w: number, floorY: number, gapH: number): void {
-  c.save();
-  // stone block wall with opening
-  c.fillStyle = '#7d5a30';
-  c.fillRect(x, floorY - gapH - 260, w, 260);
-  c.fillStyle = '#936f3d';
-  c.fillRect(x, floorY - gapH, w, gapH); // below opening
-  // opening
-  c.fillStyle = 'rgba(15,10,4,0.92)';
-  c.fillRect(x, floorY - gapH, w, gapH);
-  c.strokeStyle = PAL.gold;
-  c.lineWidth = 4;
-  c.strokeRect(x, floorY - gapH, w, gapH);
-  // height dashes
-  c.setLineDash([10, 8]);
-  c.strokeStyle = 'rgba(255,220,120,0.9)';
+  drawPlanks(c, x, y, w, h);
+  // rope rails
+  c.strokeStyle = 'rgba(90,55,10,0.6)';
   c.lineWidth = 3;
   c.beginPath();
-  c.moveTo(x - 30, floorY - gapH);
-  c.lineTo(x + w + 30, floorY - gapH);
+  c.moveTo(x, y - 6);
+  c.quadraticCurveTo(x + w * 0.5, y - 18, x + w, y - 6);
   c.stroke();
-  c.setLineDash([]);
+}
+
+// cave wall with a low tunnel opening (only 2s fit)
+export function drawTunnelArch(c: Ctx, x: number, w: number, floorY: number, gapH: number): void {
+  c.save();
+  // wall slab
+  const g = c.createLinearGradient(x, floorY - 420, x + w, floorY);
+  g.addColorStop(0, '#a3845a');
+  g.addColorStop(1, '#5e4426');
+  c.fillStyle = g;
+  roundRect(c, x - 30, floorY - 430, w + 60, 430, 26);
+  c.fill();
+  c.strokeStyle = 'rgba(40,24,8,0.5)';
+  c.lineWidth = 3;
+  roundRect(c, x - 30, floorY - 430, w + 60, 430, 26);
+  c.stroke();
+  // tunnel opening (dark arch)
+  c.fillStyle = '#120a04';
+  c.beginPath();
+  c.moveTo(x + 10, floorY);
+  c.lineTo(x + 10, floorY - gapH * 0.55);
+  c.quadraticCurveTo(x + 10, floorY - gapH, x + w * 0.5, floorY - gapH);
+  c.quadraticCurveTo(x + w - 10, floorY - gapH, x + w - 10, floorY - gapH * 0.55);
+  c.lineTo(x + w - 10, floorY);
+  c.closePath();
+  c.fill();
+  // faint light inside the tunnel
+  const lg = c.createLinearGradient(x + 10, floorY - gapH, x + w - 10, floorY);
+  lg.addColorStop(0, 'rgba(255,220,150,0.14)');
+  lg.addColorStop(1, 'rgba(255,220,150,0)');
+  c.fillStyle = lg;
+  c.beginPath();
+  c.moveTo(x + 10, floorY);
+  c.lineTo(x + 10, floorY - gapH * 0.55);
+  c.quadraticCurveTo(x + 10, floorY - gapH, x + w * 0.5, floorY - gapH);
+  c.quadraticCurveTo(x + w - 10, floorY - gapH, x + w - 10, floorY - gapH * 0.55);
+  c.lineTo(x + w - 10, floorY);
+  c.closePath();
+  c.fill();
+  // small stalactites on the arch lip
+  c.fillStyle = '#3c2a12';
+  for (let i = 0; i < 3; i++) {
+    const sx = x + w * (0.3 + i * 0.2);
+    c.beginPath();
+    c.moveTo(sx - 9, floorY - gapH - 2);
+    c.lineTo(sx + 9, floorY - gapH - 2);
+    c.lineTo(sx, floorY - gapH + 16 + i * 4);
+    c.closePath();
+    c.fill();
+  }
   c.restore();
 }
 
-// Sleeping guard eye (level 5)
+// the giant eye embedded in the cave wall
 export function drawGuardEye(c: Ctx, cx: number, cy: number, openness: number, t: number): void {
   c.save();
-  // stone socket
-  c.fillStyle = '#3a2c18';
+  // dark socket in the rock
+  c.fillStyle = 'rgba(14,8,3,0.92)';
   c.beginPath();
-  c.ellipse(cx, cy, 86, 56, 0, 0, Math.PI * 2);
+  c.ellipse(cx, cy, 120, 86, 0, 0, Math.PI * 2);
   c.fill();
-  c.strokeStyle = PAL.gold;
-  c.lineWidth = 5;
+  // rocky rim
+  c.strokeStyle = 'rgba(90,64,30,0.85)';
+  c.lineWidth = 12;
+  c.beginPath();
+  c.ellipse(cx, cy, 122, 88, 0, 0, Math.PI * 2);
   c.stroke();
-  // eyelid
-  c.save();
-  c.beginPath();
-  c.ellipse(cx, cy, 84, 54, 0, 0, Math.PI * 2);
-  c.clip();
-  c.fillStyle = '#e8dfc8';
-  c.beginPath();
-  c.ellipse(cx, cy, 80, 50 * openness, 0, 0, Math.PI * 2);
-  c.fill();
-  if (openness > 0.2) {
-    // iris - amber with slit
-    c.fillStyle = '#c98a1e';
-    c.beginPath();
-    c.arc(cx, cy, 34 * openness, 0, Math.PI * 2);
-    c.fill();
-    c.fillStyle = '#241a10';
-    c.beginPath();
-    c.ellipse(cx, cy, 10, 26 * openness, 0, 0, Math.PI * 2);
-    c.fill();
-    // glint
-    c.fillStyle = 'rgba(255,255,255,0.7)';
-    c.beginPath();
-    c.arc(cx - 10, cy - 10 * openness, 6, 0, Math.PI * 2);
-    c.fill();
-  }
-  c.restore();
-  c.restore();
-  // light cone when open
-  if (openness > 0.3) {
+  const open = Math.max(0, Math.min(1, openness));
+  if (open > 0.02) {
+    // eye white
+    const blink = 1 - open;
     c.save();
-    c.globalCompositeOperation = 'lighter';
-    const swing = Math.sin(t * 0.9) * 120;
-    const g = c.createLinearGradient(cx, cy, cx + swing, 1024);
-    g.addColorStop(0, `rgba(255,235,160,${0.34 * openness})`);
-    g.addColorStop(1, 'rgba(255,235,160,0)');
-    c.fillStyle = g;
     c.beginPath();
-    c.moveTo(cx - 30, cy);
-    c.lineTo(cx + 30, cy);
-    c.lineTo(cx + swing + 200, 1024);
-    c.lineTo(cx + swing - 200, 1024);
-    c.closePath();
+    c.ellipse(cx, cy, 92, 62, 0, 0, Math.PI * 2);
+    c.clip();
+    const g = c.createRadialGradient(cx, cy - 20, 8, cx, cy, 95);
+    g.addColorStop(0, '#fdfaf0');
+    g.addColorStop(1, '#e8dcc0');
+    c.fillStyle = g;
+    c.fillRect(cx - 100, cy - 70, 200, 140);
+    // iris follows time
+    const ix = Math.sin(t * 0.8) * 22;
+    const iy = Math.cos(t * 0.6) * 10;
+    const ig = c.createRadialGradient(cx + ix, cy + iy, 6, cx + ix, cy + iy, 34);
+    ig.addColorStop(0, '#5e3c1e');
+    ig.addColorStop(1, '#2e1c0c');
+    c.fillStyle = ig;
+    c.beginPath();
+    c.arc(cx + ix, cy + iy, 34, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#0c0805';
+    c.beginPath();
+    c.arc(cx + ix, cy + iy, 15, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = 'rgba(255,255,255,0.8)';
+    c.beginPath();
+    c.arc(cx + ix - 9, cy + iy - 10, 6, 0, Math.PI * 2);
     c.fill();
     c.restore();
-  }
-}
-
-// Exit door opening to tropical paradise (level 5/6)
-export function drawExitDoor(c: Ctx, cx: number, baseY: number, openT: number, t: number): void {
-  const w = 300;
-  const h = 420;
-  const topY = baseY - h;
-  c.save();
-  // paradise behind (visible through opening as door lifts)
-  c.save();
-  c.beginPath();
-  c.rect(cx - w / 2, topY + h * (1 - openT), w, h * openT);
-  c.clip();
-  // sky
-  const sky = c.createLinearGradient(0, topY, 0, baseY);
-  sky.addColorStop(0, PAL.skyTop);
-  sky.addColorStop(1, '#e8f8ea');
-  c.fillStyle = sky;
-  c.fillRect(cx - w / 2, topY, w, h);
-  // sea band
-  c.fillStyle = PAL.water;
-  c.fillRect(cx - w / 2, baseY - 150, w, 60);
-  // sand
-  c.fillStyle = PAL.sand;
-  c.beginPath();
-  c.ellipse(cx, baseY - 40, w * 0.75, 90, 0, Math.PI, 0);
-  c.fill();
-  c.fillRect(cx - w / 2, baseY - 45, w, 45);
-  // palm trees
-  for (const [px, s] of [[cx - 90, 1], [cx + 30, 1.15], [cx + 105, 0.85]] as Array<[number, number]>) {
-    const trunkH = 120 * s;
-    c.strokeStyle = PAL.palmTrunk;
-    c.lineWidth = 13 * s;
-    c.lineCap = 'round';
-    c.beginPath();
-    c.moveTo(px, baseY - 50);
-    c.quadraticCurveTo(px + 12 * s, baseY - 50 - trunkH * 0.6, px + 4 * s, baseY - 50 - trunkH);
-    c.stroke();
-    const top = { x: px + 4 * s, y: baseY - 50 - trunkH };
-    const sway = Math.sin(t * 1.6 + px) * 5;
-    for (let i = 0; i < 5; i++) {
-      const a = (-0.9 + i * 0.45) + sway * 0.01;
-      c.strokeStyle = i % 2 === 0 ? PAL.palmLeaf : PAL.palmLeafPink;
-      c.lineWidth = 12 * s;
+    // eyelids closing from top & bottom
+    c.fillStyle = '#6b4a26';
+    if (blink > 0.02) {
       c.beginPath();
-      c.moveTo(top.x, top.y);
-      c.quadraticCurveTo(
-        top.x + Math.cos(a) * 46 * s, top.y + Math.sin(a) * 30 * s - 12,
-        top.x + Math.cos(a) * 84 * s, top.y + Math.sin(a) * 58 * s + 10
-      );
-      c.stroke();
+      c.ellipse(cx, cy - 62, 96, 62 * blink + 6, 0, Math.PI, 0);
+      c.fill();
+      c.beginPath();
+      c.ellipse(cx, cy + 62, 96, 62 * blink + 6, 0, 0, Math.PI);
+      c.fill();
     }
+  } else {
+    // closed lid seam
+    c.strokeStyle = 'rgba(40,26,10,0.9)';
+    c.lineWidth = 5;
+    c.beginPath();
+    c.moveTo(cx - 80, cy);
+    c.quadraticCurveTo(cx, cy + 8, cx + 80, cy);
+    c.stroke();
   }
   c.restore();
-  // stone door slab sliding up
-  const slabY = topY - h * openT;
-  c.fillStyle = '#a8835a';
-  roundRect(c, cx - w / 2 - 8, slabY, w + 16, h + 10, 10);
-  c.fill();
-  // glyph pattern
-  c.strokeStyle = 'rgba(80,55,25,0.8)';
-  c.lineWidth = 6;
-  for (const gx of [cx - w * 0.25, cx + w * 0.25]) {
-    roundRect(c, gx - 26, slabY + 60, 52, 52, 8);
-    c.stroke();
-    roundRect(c, gx - 26, slabY + 140, 52, 52, 8);
-    c.stroke();
+}
+
+// carved stone exit door with maze pattern, opens into light
+export function drawExitDoor(c: Ctx, cx: number, baseY: number, openT: number, t: number): void {
+  c.save();
+  const w = 150;
+  const h = 210;
+  const open = Math.max(0, Math.min(1, openT));
+  // bright light behind (grows as the door opens)
+  if (open > 0) {
+    const lg = c.createRadialGradient(cx, baseY - h * 0.45, 4, cx, baseY - h * 0.45, w * (0.8 + open));
+    lg.addColorStop(0, `rgba(255,246,200,${0.9 * open})`);
+    lg.addColorStop(1, 'rgba(255,246,200,0)');
+    c.fillStyle = lg;
+    c.fillRect(cx - w * 1.6, baseY - h * 1.8, w * 3.2, h * 2);
   }
   // frame
-  c.strokeStyle = '#c9a25e';
-  c.lineWidth = 14;
-  roundRect(c, cx - w / 2 - 14, topY - 14, w + 28, h + 20, 14);
-  c.stroke();
-  // glow when opening
-  if (openT > 0.05 && openT < 0.99) {
+  c.fillStyle = '#5e4426';
+  roundRect(c, cx - w * 0.62, baseY - h * 1.1, w * 1.24, h * 1.1, 14);
+  c.fill();
+  // door slabs sliding apart
+  const shift = open * w * 0.52;
+  for (const side of [-1, 1]) {
     c.save();
-    c.globalCompositeOperation = 'lighter';
-    const g2 = c.createRadialGradient(cx, baseY - h / 2, 10, cx, baseY - h / 2, 320);
-    g2.addColorStop(0, `rgba(255,250,210,${0.5 * openT})`);
-    g2.addColorStop(1, 'rgba(255,250,210,0)');
-    c.fillStyle = g2;
-    c.fillRect(0, 0, 576, 1024);
+    c.beginPath();
+    c.rect(cx - w * 0.62, baseY - h * 1.05, w * 1.24, h * 1.05);
+    c.clip();
+    const dx = cx + side * shift;
+    const g = c.createLinearGradient(dx - w / 2, baseY - h, dx + w / 2, baseY);
+    g.addColorStop(0, '#e6b45e');
+    g.addColorStop(0.5, '#d9a85c');
+    g.addColorStop(1, '#a8793a');
+    c.fillStyle = g;
+    roundRect(c, dx - w * 0.5, baseY - h * 1.05, w, h * 1.05, 8);
+    c.fill();
+    // maze / greek-key carving
+    c.strokeStyle = 'rgba(110,76,28,0.85)';
+    c.lineWidth = 5;
+    const my0 = baseY - h * 0.92;
+    const half = w * 0.36;
+    for (let row = 0; row < 3; row++) {
+      const yy = my0 + row * h * 0.3;
+      c.beginPath();
+      c.moveTo(dx - half, yy + h * 0.12);
+      c.lineTo(dx - half, yy);
+      c.lineTo(dx + half, yy);
+      c.lineTo(dx + half, yy + h * 0.12);
+      c.stroke();
+      if (row < 2) {
+        c.beginPath();
+        c.moveTo(dx - half * 0.5, yy + h * 0.12);
+        c.lineTo(dx - half * 0.5, yy + h * 0.2);
+        c.lineTo(dx + half * 0.5, yy + h * 0.2);
+        c.lineTo(dx + half * 0.5, yy + h * 0.12);
+        c.stroke();
+      }
+    }
+    c.strokeStyle = 'rgba(50,32,8,0.5)';
+    c.lineWidth = 2;
+    roundRect(c, dx - w * 0.5, baseY - h * 1.05, w, h * 1.05, 8);
+    c.stroke();
     c.restore();
+  }
+  // golden light spilling out onto the floor
+  if (open > 0.1) {
+    const sg = c.createLinearGradient(cx, baseY, cx, baseY + 60);
+    sg.addColorStop(0, `rgba(255,238,170,${0.75 * open})`);
+    sg.addColorStop(1, 'rgba(255,238,170,0)');
+    c.fillStyle = sg;
+    c.beginPath();
+    c.ellipse(cx, baseY + 18, w * 0.7 * open, 26 * open, 0, 0, Math.PI * 2);
+    c.fill();
   }
   c.restore();
 }
 
 // ============================================================
-// UI
+// TEXT / UI
 // ============================================================
 
+// rotating yellow starburst (equation reveal cards)
 export function drawStarburst(c: Ctx, t: number, alpha = 1): void {
-  // yellow radial burst background (the split-reveal look)
   c.save();
   c.globalAlpha = alpha;
-  c.fillStyle = '#f7e04b';
-  c.fillRect(0, 0, 576, 1024);
   const cx = 288;
   const cy = 512;
+  // base warm fill
+  const bg = c.createRadialGradient(cx, cy, 30, cx, cy, 640);
+  bg.addColorStop(0, '#fffef2');
+  bg.addColorStop(0.35, '#fff3b8');
+  bg.addColorStop(1, '#ffd94a');
+  c.fillStyle = bg;
+  c.fillRect(0, 0, 576, 1024);
+  // rotating rays
   c.save();
   c.translate(cx, cy);
-  c.rotate(t * 0.4);
-  for (let i = 0; i < 16; i++) {
-    c.rotate((Math.PI * 2) / 16);
-    const g = c.createLinearGradient(0, 0, 0, -600);
-    g.addColorStop(0, 'rgba(255,255,255,0.9)');
-    g.addColorStop(0.5, 'rgba(255,240,140,0)');
-    g.addColorStop(1, 'rgba(255,255,255,0.55)');
-    c.fillStyle = g;
+  c.rotate(t * 0.12);
+  const R = 760;
+  for (let i = 0; i < 24; i++) {
+    const a0 = (i * Math.PI * 2) / 24;
+    const a1 = a0 + Math.PI / 24;
+    c.fillStyle = i % 2 === 0 ? 'rgba(255,214,64,0.85)' : 'rgba(255,190,40,0.55)';
     c.beginPath();
-    c.moveTo(-40, 0);
-    c.lineTo(40, 0);
-    c.lineTo(0, -620);
+    c.moveTo(0, 0);
+    c.arc(0, 0, R, a0, a1);
     c.closePath();
     c.fill();
   }
   c.restore();
-  // white hot center
-  const g2 = c.createRadialGradient(cx, cy, 10, cx, cy, 300);
-  g2.addColorStop(0, 'rgba(255,255,255,0.95)');
-  g2.addColorStop(1, 'rgba(255,255,255,0)');
-  c.fillStyle = g2;
-  c.beginPath();
-  c.arc(cx, cy, 320, 0, Math.PI * 2);
-  c.fill();
+  // white core
+  const cg = c.createRadialGradient(cx, cy, 10, cx, cy, 260);
+  cg.addColorStop(0, 'rgba(255,255,255,0.98)');
+  cg.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = cg;
+  c.fillRect(0, 0, 576, 1024);
   c.restore();
 }
 
-// Big black equation text (e.g. "8 = 4 + 4")
-export function drawEquation(c: Ctx, parts: string[], cx: number, cy: number, scale = 1): void {
+let eqFont = '"Nunito", "Arial Rounded MT Bold", Arial, sans-serif';
+
+// allow the app to inject the self-hosted Nunito family from next/font
+export function setEquationFont(familyList: string): void {
+  if (familyList) eqFont = `${familyList}, "Nunito", Arial, sans-serif`;
+}
+
+function eqText(c: Ctx, text: string, cx: number, cy: number, size: number, color = PAL.text): void {
   c.save();
-  c.font = `800 ${72 * scale}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  c.font = `800 ${size}px ${eqFont}`;
   c.textAlign = 'center';
   c.textBaseline = 'middle';
-  const text = parts.join(' ');
-  c.fillStyle = PAL.black;
+  c.fillStyle = color;
   c.fillText(text, cx, cy);
   c.restore();
 }
 
-// Chip-based equation UI (green squares appear as you play) - level 1
+// plain equation line (like the video: dark grey rounded numerals)
+export function drawEquation(c: Ctx, parts: string[], cx: number, cy: number, scale = 1): void {
+  eqText(c, parts.join(' '), cx, cy, Math.round(64 * scale), PAL.text);
+}
+
+// small equation chips row (4 + 4 = ?)
 export function drawChipEquation(c: Ctx, x: number, y: number, chips: Array<'4' | '+' | '=' | '8' | '?'>): void {
   c.save();
+  const size = 46;
+  c.font = `800 ${size}px ${eqFont}`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
   let cx = x;
-  for (const chip of chips) {
-    if (chip === '?' || !isNaN(Number(chip))) {
-      const isQ = chip === '?';
-      c.fillStyle = isQ ? 'rgba(255,255,255,0.35)' : 'rgba(150,220,90,0.85)';
-      roundRect(c, cx, y, 52, 52, 10);
-      c.fill();
-      c.strokeStyle = 'rgba(255,255,255,0.6)';
-      c.lineWidth = 2;
-      c.stroke();
-      if (!isQ) {
-        c.fillStyle = PAL.black;
-        c.font = '800 34px "Nunito", Arial, sans-serif';
-        c.textAlign = 'center';
-        c.textBaseline = 'middle';
-        c.fillText(chip, cx + 26, y + 27);
-      }
-    } else {
-      c.fillStyle = PAL.black;
-      c.font = '800 46px "Nunito", Arial, sans-serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillText(chip, cx + 26, y + 26);
-    }
-    cx += chip === '?' || !isNaN(Number(chip)) ? 64 : 46;
+  for (const ch of chips) {
+    const w = Math.max(c.measureText(ch).width, 20) + 6;
+    c.fillStyle = ch === '?' ? 'rgba(61,61,61,0.45)' : PAL.text;
+    c.fillText(ch, cx + w / 2, y);
+    cx += w + 10;
   }
   c.restore();
 }
 
-// Apple counter HUD (level 2)
+// row of mini apples showing progress n/8
 export function drawAppleCounter(c: Ctx, x: number, y: number, count: number, total: number): void {
   c.save();
-  c.fillStyle = 'rgba(20,16,10,0.65)';
-  roundRect(c, x - 8, y - 8, 24 * total + 16, 40, 14);
-  c.fill();
   for (let i = 0; i < total; i++) {
-    const ax = x + i * 24 + 4;
+    const ax = x + i * 30;
     if (i < count) {
-      drawApple(c, ax, y + 12, 8, false, i);
+      drawApple(c, ax, y, 11, false, 0);
     } else {
-      c.fillStyle = 'rgba(255,255,255,0.22)';
+      c.fillStyle = 'rgba(60,40,14,0.5)';
       c.beginPath();
-      c.arc(ax, y + 12, 8, 0, Math.PI * 2);
+      c.arc(ax, y, 11, 0, Math.PI * 2);
       c.fill();
     }
   }
   c.restore();
 }
 
-// Progress bar HUD
 export function drawProgressBar(c: Ctx, x: number, y: number, w: number, h: number, pct: number): void {
   c.save();
-  c.fillStyle = 'rgba(20,16,10,0.65)';
+  c.fillStyle = 'rgba(30,20,8,0.6)';
   roundRect(c, x, y, w, h, h / 2);
   c.fill();
-  c.fillStyle = PAL.gold;
-  roundRect(c, x + 3, y + 3, Math.max(h - 6, (w - 6) * Math.min(1, pct)), h - 6, (h - 6) / 2);
-  c.fill();
+  if (pct > 0.01) {
+    const g = c.createLinearGradient(x, y, x + w, y);
+    g.addColorStop(0, '#c98a1e');
+    g.addColorStop(1, '#ffd766');
+    c.fillStyle = g;
+    roundRect(c, x, y, Math.max(h, w * Math.min(1, pct)), h, h / 2);
+    c.fill();
+  }
   c.restore();
 }
 
-// Big yellow SPLIT button
-export function drawSplitButton(c: Ctx, cx: number, cy: number, r: number, pulseT: number, label = 'SPLIT!'): void {
+// round action button, icon-only (split arrows / hop arrow)
+export function drawSplitButton(c: Ctx, cx: number, cy: number, r: number, pulseT: number, label = 'SPLIT'): void {
   c.save();
-  const pulse = 1 + Math.sin(pulseT * 5) * 0.05;
-  // glow
-  const g = c.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 1.7);
-  g.addColorStop(0, 'rgba(255,215,80,0.5)');
-  g.addColorStop(1, 'rgba(255,215,80,0)');
+  const pulse = 1 + Math.sin(pulseT * 4) * 0.06;
+  c.translate(cx, cy);
+  c.scale(pulse, pulse);
+  // halo
+  const hg = c.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.7);
+  hg.addColorStop(0, 'rgba(255,215,110,0.35)');
+  hg.addColorStop(1, 'rgba(255,215,110,0)');
+  c.fillStyle = hg;
+  c.beginPath();
+  c.arc(0, 0, r * 1.7, 0, Math.PI * 2);
+  c.fill();
+  // button
+  const g = c.createLinearGradient(0, -r, 0, r);
+  g.addColorStop(0, 'rgba(40,28,12,0.92)');
+  g.addColorStop(1, 'rgba(18,12,4,0.92)');
   c.fillStyle = g;
   c.beginPath();
-  c.arc(cx, cy, r * 1.7, 0, Math.PI * 2);
+  c.arc(0, 0, r, 0, Math.PI * 2);
   c.fill();
-  // body
-  const bg = c.createLinearGradient(cx, cy - r, cx, cy + r);
-  bg.addColorStop(0, PAL.goldLight);
-  bg.addColorStop(0.55, PAL.gold);
-  bg.addColorStop(1, PAL.goldDark);
-  c.fillStyle = bg;
-  c.beginPath();
-  c.arc(cx, cy, r * pulse, 0, Math.PI * 2);
-  c.fill();
-  c.strokeStyle = 'rgba(120,70,10,0.7)';
-  c.lineWidth = 4;
+  c.strokeStyle = PAL.gold;
+  c.lineWidth = 4.5;
   c.stroke();
-  // label
-  c.fillStyle = '#4a2c08';
-  c.font = `800 ${r * 0.52}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
-  c.textAlign = 'center';
-  c.textBaseline = 'middle';
-  c.fillText(label, cx, cy + r * 0.04);
+  // icon
+  c.strokeStyle = PAL.goldLight;
+  c.fillStyle = PAL.goldLight;
+  c.lineWidth = 6;
+  c.lineCap = 'round';
+  c.lineJoin = 'round';
+  if (label.toUpperCase().includes('HOP')) {
+    // hop: up arrow
+    c.beginPath();
+    c.moveTo(0, r * 0.5);
+    c.lineTo(0, -r * 0.42);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(-r * 0.3, -r * 0.12);
+    c.lineTo(0, -r * 0.48);
+    c.lineTo(r * 0.3, -r * 0.12);
+    c.stroke();
+  } else {
+    // split: one line diverging into two arrows
+    c.beginPath();
+    c.moveTo(-r * 0.5, r * 0.3);
+    c.lineTo(0, -r * 0.05);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(0, -r * 0.05);
+    c.quadraticCurveTo(r * 0.22, -r * 0.18, r * 0.44, -r * 0.4);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(0, -r * 0.05);
+    c.quadraticCurveTo(r * 0.3, r * 0.02, r * 0.5, r * 0.12);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(r * 0.3, -r * 0.5);
+    c.lineTo(r * 0.5, -r * 0.46);
+    c.lineTo(r * 0.4, -r * 0.28);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(r * 0.38, r * 0.02);
+    c.lineTo(r * 0.54, r * 0.06);
+    c.lineTo(r * 0.44, r * 0.22);
+    c.stroke();
+  }
   c.restore();
 }
 
-// Text banner (alerts, hints)
+// rounded banner (kept for compatibility; engine now stays word-free)
 export function drawBanner(c: Ctx, text: string, y: number, t: number, color = PAL.red, size = 40): void {
   c.save();
-  const shake = Math.sin(t * 30) * 3;
-  c.font = `800 ${size}px "Nunito", "Arial Rounded MT Bold", Arial, sans-serif`;
+  c.font = `900 ${size}px ${eqFont}`;
+  const w = c.measureText(text).width + 56;
+  c.fillStyle = 'rgba(18,12,4,0.82)';
+  roundRect(c, 288 - w / 2, y - size * 0.75, w, size * 1.5, size * 0.75);
+  c.fill();
+  c.strokeStyle = color;
+  c.lineWidth = 3.5;
+  roundRect(c, 288 - w / 2, y - size * 0.75, w, size * 1.5, size * 0.75);
+  c.stroke();
   c.textAlign = 'center';
   c.textBaseline = 'middle';
-  c.lineWidth = 8;
-  c.strokeStyle = 'rgba(0,0,0,0.75)';
-  c.strokeText(text, 288 + shake, y);
   c.fillStyle = color;
-  c.fillText(text, 288 + shake, y);
+  c.font = `900 ${size}px ${eqFont}`;
+  c.fillText(text, 288, y);
   c.restore();
 }
 
-// Floating particles (sparkles/confetti)
+// ============================================================
+// PARTICLES
+// ============================================================
+
 export interface Particle {
-  x: number; y: number; vx: number; vy: number;
-  life: number; maxLife: number; color: string; size: number; spin: number; rot: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  ttl: number;
+  color: string;
+  size: number;
+  rot: number;
+  vr: number;
+  star: boolean;
 }
 
 export function updateParticles(ps: Particle[], dt: number, gravity = 300): void {
   for (const p of ps) {
+    p.life += dt;
+    p.vy += gravity * dt;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.vy += gravity * dt;
-    p.rot += p.spin * dt;
-    p.life -= dt;
+    p.rot += p.vr * dt;
   }
   for (let i = ps.length - 1; i >= 0; i--) {
-    if (ps[i].life <= 0) ps.splice(i, 1);
+    if (ps[i].life > ps[i].ttl) ps.splice(i, 1);
   }
 }
 
+function drawStar(c: Ctx, x: number, y: number, r: number, rot: number): void {
+  c.save();
+  c.translate(x, y);
+  c.rotate(rot);
+  c.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+    const a2 = a + Math.PI / 5;
+    c.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    c.lineTo(Math.cos(a2) * r * 0.45, Math.sin(a2) * r * 0.45);
+  }
+  c.closePath();
+  c.fill();
+  c.restore();
+}
+
 export function drawParticles(c: Ctx, ps: Particle[]): void {
+  c.save();
   for (const p of ps) {
-    c.save();
-    c.globalAlpha = Math.max(0, Math.min(1, p.life / p.maxLife));
-    c.translate(p.x, p.y);
-    c.rotate(p.rot);
+    const a = 1 - p.life / p.ttl;
+    c.globalAlpha = Math.max(0, a);
     c.fillStyle = p.color;
-    if (p.size > 3) {
-      c.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+    if (p.star) {
+      drawStar(c, p.x, p.y, p.size, p.rot);
     } else {
       c.beginPath();
-      c.arc(0, 0, p.size, 0, Math.PI * 2);
+      c.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       c.fill();
     }
-    c.restore();
   }
+  c.restore();
 }
 
 export function spawnSparkles(ps: Particle[], x: number, y: number, n: number, color: string): void {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
-    const sp = 80 + Math.random() * 240;
+    const sp = 60 + Math.random() * 240;
     ps.push({
       x, y,
       vx: Math.cos(a) * sp,
-      vy: Math.sin(a) * sp - 100,
-      life: 0.7 + Math.random() * 0.6,
-      maxLife: 1.2,
-      color,
-      size: 3 + Math.random() * 7,
-      spin: (Math.random() - 0.5) * 8,
+      vy: Math.sin(a) * sp - 120,
+      life: 0,
+      ttl: 0.5 + Math.random() * 0.7,
+      color: Array.isArray(color) ? color[i % color.length] : color,
+      size: 3 + Math.random() * 5,
       rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 6,
+      star: Math.random() > 0.4,
     });
   }
 }
